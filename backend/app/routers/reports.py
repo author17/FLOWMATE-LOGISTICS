@@ -22,6 +22,10 @@ def dashboard(location_id: int | None = None, db: Session = Depends(get_db), u=D
     ef = [E.location_id == location_id] if location_id else []
     sales_today = _sum(db, O.total_cents, func.date(O.created_at) == today.isoformat(), O.status != "CANCELLED", *of)
     sales_month = _sum(db, O.total_cents, func.date(O.created_at) >= m0.isoformat(), O.status != "CANCELLED", *of)
+    SP = models.SubPayment
+    sf = [SP.location_id == location_id] if location_id else []
+    sales_today += _sum(db, SP.amount_cents, SP.paid_on == today, *sf)
+    sales_month += _sum(db, SP.amount_cents, SP.paid_on >= m0, *sf)
     exp_today = _sum(db, E.amount_cents, E.spent_on == today, *ef)
     exp_month = _sum(db, E.amount_cents, E.spent_on >= m0, *ef)
     unpaid = db.execute(select(func.count(), func.coalesce(func.sum(I.total_cents), 0)).where(I.status != "PAID")).one()
@@ -31,6 +35,7 @@ def dashboard(location_id: int | None = None, db: Session = Depends(get_db), u=D
     by_loc = []
     for l in db.scalars(select(models.Location)):
         s = _sum(db, O.total_cents, func.date(O.created_at) >= m0.isoformat(), O.status != "CANCELLED", O.location_id == l.id)
+        s += _sum(db, SP.amount_cents, SP.paid_on >= m0, SP.location_id == l.id)
         e = _sum(db, E.amount_cents, E.spent_on >= m0, E.location_id == l.id)
         by_loc.append({"location": l.name, "sales_cents": s, "expenses_cents": e, "profit_cents": s - e})
     return {"sales_today_cents": sales_today, "expenses_today_cents": exp_today, "sales_month_cents": sales_month, "expenses_month_cents": exp_month,

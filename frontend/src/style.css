@@ -13,3 +13,6 @@ input,select{padding:7px;border:1px solid var(--line);border-radius:6px;backgrou
 .tag{padding:2px 8px;border-radius:10px;font-size:11px;background:var(--bg);border:1px solid var(--line)}.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 .err{background:var(--bad);color:#fff;padding:8px 12px;border-radius:6px;margin-bottom:10px}.login{max-width:320px;margin:15vh auto;display:grid;gap:10px}
 .scroll{overflow-x:auto}.mute{color:var(--mute)}
+.logo2{padding:0 8px 10px;font-size:11px}.who{padding:8px;margin-top:10px}.pop{position:absolute;right:0;top:38px;width:min(360px,90vw);z-index:5;max-height:70vh;overflow:auto}
+a.btn{text-decoration:none;display:inline-block}
+@media(max-width:760px){.app{flex-direction:column}.side{width:100%;border-right:0;border-bottom:1px solid var(--line);padding:8px}.tabs{display:flex;overflow-x:auto;gap:4px}.tabs button{white-space:nowrap;width:auto}.main{padding:12px}h1{font-size:18px}.who{display:none}}

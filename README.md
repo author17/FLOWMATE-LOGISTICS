@@ -5,7 +5,7 @@ Orders → Stock → Documents → Suppliers → Payments → Delivery → Banki
 
 *From the first order to the final payment — FLOWMATE keeps everything connected.*
 
-(MVP v0.2 - every link in the chain is now built.)
+(v0.4 - all blueprint modules have screens; see docs/ROADMAP.md for what is still open.)
 
 Stack: Python FastAPI + SQLAlchemy (SQLite now, PostgreSQL later) + React (Vite).
 
@@ -43,3 +43,6 @@ mobile app (the web app already opens the camera on phones); Cyprus VAT/cash-reg
 
 ## Publishing
 See docs/DEPLOY.md (Dockerfile, docker-compose.yml, render.yaml included). Practice copy = DEMO_MODE=1 with fake data; real copy = ENV=production + create_owner.py.
+
+## v0.4 adds
+Gym memberships (plans, members, check-in, renewals, balances), 12 reports as PDF/Excel/CSV, Stripe card payment links, business assistant, user management, settings, notifications bell, customers/products/expenses/purchase-order screens, installable phone app (PWA), real-system bootstrap via BOOTSTRAP_* variables.

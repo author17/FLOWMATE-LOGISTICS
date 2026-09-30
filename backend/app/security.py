@@ -35,10 +35,10 @@ def current_user(token: str = Depends(oauth2), db: Session = Depends(get_db)) ->
 # Role permissions per area. "owner" and "admin" can do everything.
 PERMS = {
     "owner": {"*"}, "admin": {"*"},
-    "manager": {"orders", "customers", "suppliers", "products", "stock", "invoices", "expenses", "documents", "shifts", "reports", "banking_read", "purchase", "delivery"},
-    "employee": {"orders", "documents", "shifts", "stock_read", "delivery"},
+    "manager": {"orders", "customers", "suppliers", "products", "stock", "invoices", "expenses", "documents", "shifts", "reports", "banking_read", "purchase", "delivery", "memberships", "assistant", "stock_read"},
+    "employee": {"orders", "documents", "shifts", "stock_read", "delivery", "memberships", "assistant_basic"},
     "driver": {"delivery", "documents"},
-    "accountant": {"invoices", "expenses", "reports", "banking_read", "documents"},
+    "accountant": {"invoices", "expenses", "reports", "banking_read", "documents", "assistant", "stock_read"},
     "bank_payment": {"invoices", "banking_read", "payments"},
 }
 

@@ -13,3 +13,9 @@ export async function api(path, opts = {}) {
   if (!r.ok) { let m = r.statusText; try { const j = await r.json(); m = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch {} throw new Error(m); }
   return r.json();
 }
+
+export async function download(path, filename) {
+  const r = await fetch("/api" + path, { headers: { Authorization: "Bearer " + localStorage.getItem("token") } });
+  if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail; } catch {} throw new Error(m); }
+  const url = URL.createObjectURL(await r.blob()); const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
+}

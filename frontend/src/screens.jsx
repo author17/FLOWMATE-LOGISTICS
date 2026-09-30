@@ -1,16 +1,7 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { api, eur, cents } from "./api.js";
 
-function useData(path) {
-  const [d, setD] = useState(null), [err, setErr] = useState("");
-  const load = useCallback(() => api(path).then(x => { setD(x); setErr(""); }).catch(e => setErr(e.message)), [path]);
-  useEffect(() => { load(); }, [load]);
-  return [d, load, err];
-}
-const Err = ({ e }) => e ? <div className="err">{e}</div> : null;
-const Tag = ({ s }) => <span className={"tag " + (["PAID", "COMPLETED", "RECONCILED", "VERIFIED"].includes(s) ? "good" : ["UNMATCHED", "FAILED", "REJECTED", "CANCELLED"].includes(s) ? "bad" : "warn")}>{s}</span>;
-const Table = ({ cols, rows }) => <div className="scroll"><table><thead><tr>{cols.map(c => <th key={c[0]}>{c[0]}</th>)}</tr></thead><tbody>{rows.map((r, i) => <tr key={r.id ?? i}>{cols.map(c => <td key={c[0]}>{c[1](r)}</td>)}</tr>)}</tbody></table></div>;
-const Card = ({ l, v, cls }) => <div className="card"><div className="l">{l}</div><div className={"v " + (cls || "")}>{v}</div></div>;
+import { useData, Err, Tag, Table, Card, PayLink } from "./ui.jsx";
 
 export function Dashboard({ loc }) {
   const [d, , err] = useData("/dashboard" + (loc ? `?location_id=${loc}` : ""));
@@ -24,15 +15,27 @@ export function Dashboard({ loc }) {
     <Table cols={[["Location", r => r.location], ["Sales", r => eur(r.sales_cents)], ["Expenses", r => eur(r.expenses_cents)], ["Profit", r => eur(r.profit_cents)]]} rows={d.by_location} /></>;
 }
 
-export function Orders({ loc, locs }) {
-  const [rows, load, err] = useData("/orders" + (loc ? `?location_id=${loc}` : "")), [products] = useData("/products"), [f, setF] = useState({ pid: "", qty: 1 }), [e2, setE2] = useState("");
-  async function add() { try { await api("/orders", { method: "POST", body: { location_id: loc || locs[0]?.id, items: [{ product_id: +f.pid, quantity: +f.qty }] } }); setE2(""); load(); } catch (x) { setE2(x.message); } }
-  async function setStatus(id, status) { await api(`/orders/${id}/status`, { method: "PUT", body: { status } }); load(); }
-  return <><h1>Orders</h1><Err e={err || e2} />
-    <div className="row"><select value={f.pid} onChange={e => setF({ ...f, pid: e.target.value })}><option value="">Product…</option>{(products || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-      <input type="number" min="1" value={f.qty} onChange={e => setF({ ...f, qty: e.target.value })} style={{ width: 70 }} /><button className="p" onClick={add} disabled={!f.pid}>New order</button></div>
-    {rows && <Table cols={[["#", r => r.id], ["Items", r => r.items.map(i => `${i.description} ×${i.quantity}`).join(", ")], ["Total", r => eur(r.total_cents)], ["Status", r => <Tag s={r.status} />],
-      ["", r => r.status !== "PAID" && r.status !== "CANCELLED" && <button className="s" onClick={() => setStatus(r.id, r.status === "NEW" ? "PROCESSING" : r.status === "PROCESSING" ? "COMPLETED" : "PAID")}>Next step</button>]]} rows={rows} />}</>;
+export function Orders({ loc, locs, user }) {
+  const [rows, load, err] = useData("/orders" + (loc ? `?location_id=${loc}` : "")), [products] = useData("/products"), [customers] = useData("/customers"), [stripe] = useData("/stripe/status");
+  const [lines, setLines] = useState([{ pid: "", qty: 1 }]), [cust, setCust] = useState(""), [method, setMethod] = useState("CASH"), [where, setWhere] = useState(""), [e2, setE2] = useState(""), [link, setLink] = useState(null);
+  const L = loc || +where || locs[0]?.id, valid = lines.filter(l => l.pid && +l.qty > 0);
+  const setLine = (i, k, v) => setLines(lines.map((l, j) => j === i ? { ...l, [k]: v } : l));
+  const run = fn => async (...a) => { try { await fn(...a); setE2(""); load(); } catch (x) { setE2(x.message); } };
+  const add = run(async () => { await api("/orders", { method: "POST", body: { location_id: L, customer_id: cust ? +cust : null, payment_method: method, items: valid.map(l => ({ product_id: +l.pid, quantity: +l.qty })) } }); setLines([{ pid: "", qty: 1 }]); setCust(""); });
+  const setStatus = run((id, status) => api(`/orders/${id}/status`, { method: "PUT", body: { status } }));
+  const payLink = run(async id => { const r = await api("/stripe/checkout", { method: "POST", body: { target_type: "order", target_id: id } }); setLink(r.url); });
+  const total = valid.reduce((a, l) => a + (products?.find(p => p.id === +l.pid)?.sell_cents || 0) * +l.qty, 0);
+  return <><h1>Orders</h1><Err e={err || e2} />{link && <PayLink url={link} onClose={() => setLink(null)} />}
+    <div className="card" style={{ marginBottom: 14 }}>{lines.map((l, i) => <div className="row" key={i}><select value={l.pid} onChange={e => setLine(i, "pid", e.target.value)}><option value="">Product…</option>{(products || []).map(p => <option key={p.id} value={p.id}>{p.name} · {eur(p.sell_cents)}</option>)}</select>
+      <input type="number" min="1" value={l.qty} onChange={e => setLine(i, "qty", e.target.value)} style={{ width: 70 }} />{lines.length > 1 && <button className="s" onClick={() => setLines(lines.filter((_, j) => j !== i))}>✕</button>}</div>)}
+      <div className="row"><button className="s" onClick={() => setLines([...lines, { pid: "", qty: 1 }])}>+ Add item</button>
+        {!loc && <select value={where} onChange={e => setWhere(e.target.value)}>{locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select>}
+        <select value={cust} onChange={e => setCust(e.target.value)}><option value="">Walk-in customer</option>{(customers || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        <select value={method} onChange={e => setMethod(e.target.value)}>{["CASH", "CARD", "BANK_TRANSFER", "ONLINE", "OTHER"].map(m => <option key={m}>{m}</option>)}</select>
+        <b>{eur(total)}</b><button className="p" onClick={add} disabled={!valid.length}>Create order</button></div></div>
+    {rows && <Table cols={[["#", r => r.id], ["Place", r => locs.find(l => l.id === r.location_id)?.name], ["Items", r => r.items.map(i => `${i.description} ×${i.quantity}`).join(", ")], ["Customer", r => customers?.find(c => c.id === r.customer_id)?.name || ""], ["Method", r => r.payment_method], ["Total", r => eur(r.total_cents)], ["Status", r => <Tag s={r.status} />],
+      ["", r => r.status !== "PAID" && r.status !== "CANCELLED" && <span className="row" style={{ margin: 0 }}><button className="s" onClick={() => setStatus(r.id, r.status === "NEW" ? "PROCESSING" : r.status === "PROCESSING" ? "COMPLETED" : "PAID")}>Next step</button>
+        {stripe?.configured && <button className="s" onClick={() => payLink(r.id)}>Card link</button>}<button className="s" onClick={() => setStatus(r.id, "CANCELLED")}>Cancel</button></span>]]} rows={rows} />}</>;
 }
 
 export function Suppliers() {
@@ -90,12 +93,13 @@ function Review({ doc, sups, locs, onDone }) {
 }
 
 export function Banking() {
-  const [txs, load, err] = useData("/bank/transactions"), [accts] = useData("/bank/accounts"), [pays, loadP] = useData("/payments"), [msg, setMsg] = useState(""), [e2, setE2] = useState("");
+  const [online] = useData("/stripe/payments"), [txs, load, err] = useData("/bank/transactions"), [accts] = useData("/bank/accounts"), [pays, loadP] = useData("/payments"), [msg, setMsg] = useState(""), [e2, setE2] = useState("");
   async function imp(ev) { const file = ev.target.files[0]; if (!file) return; const fd = new FormData(); fd.append("file", file); try { const r = await api(`/bank/accounts/${accts[0].id}/import-csv`, { method: "POST", body: fd }); setMsg(`Imported ${r.added} (skipped ${r.skipped_duplicates} duplicates). Auto-reconciled ${r.matching.reconciled}, suggestions ${r.matching.suggested}, unmatched ${r.matching.unmatched}.`); setE2(""); load(); } catch (x) { setE2(x.message); } }
   return <><h1>Banking</h1><Err e={err || e2} />{msg && <div className="card" style={{ marginBottom: 10 }}>{msg}</div>}
     <div className="row"><span>Import bank statement CSV:</span><input type="file" accept=".csv" onChange={imp} disabled={!accts?.length} /></div>
     {txs && <Table cols={[["Date", r => r.booked_on], ["Amount", r => <span className={r.amount_cents < 0 ? "bad" : "good"}>{eur(r.amount_cents)}</span>], ["Reference", r => r.reference], ["Counterparty", r => r.counterparty], ["Status", r => <Tag s={r.match_status} />],
       ["", r => r.match_status === "SUGGESTED" && <button className="s" onClick={async () => { await api(`/bank/transactions/${r.id}/confirm`, { method: "POST" }); load(); }}>Confirm {r.match?.target_type} #{r.match?.target_id}</button>]]} rows={txs} />}
+    {online?.length > 0 && <><h1 style={{ marginTop: 20 }}>Card payments (Stripe)</h1><Table cols={[["#", r => r.id], ["For", r => `${r.target_type} #${r.target_id}`], ["Amount", r => eur(r.amount_cents)], ["Status", r => <Tag s={r.status} />], ["Paid", r => r.paid_at?.slice(0, 16).replace("T", " ")]]} rows={online} /></>}
     <h1 style={{ marginTop: 20 }}>Payments to suppliers</h1>
     {pays && <Table cols={[["#", r => r.id], ["Invoice", r => r.invoice_id], ["Amount", r => eur(r.amount_cents)], ["Status", r => <Tag s={r.status} />], ["Bank ref", r => r.provider_ref],
       ["", r => !["COMPLETED", "FAILED", "REJECTED", "CANCELLED"].includes(r.status) && <button className="s" onClick={async () => { await api(`/payments/${r.id}/refresh`, { method: "POST" }); loadP(); }}>Check status</button>]]} rows={pays} />}</>;
@@ -116,11 +120,16 @@ export function CashUp({ loc, locs }) {
     {rows && <Table cols={[["#", r => r.id], ["Location", r => locs.find(l => l.id === r.location_id)?.name], ["Opened", r => r.opened_at?.slice(0, 16).replace("T", " ")], ["Cash sales", r => eur(r.cash_sales_cents)], ["Card", r => eur(r.card_sales_cents)], ["Difference", r => r.difference_cents == null ? "" : <span className={r.difference_cents ? "bad" : "good"}>{eur(r.difference_cents)}</span>], ["Status", r => <Tag s={r.status} />]]} rows={rows} />}</>;
 }
 
-export function Stock({ loc, locs }) {
+export function Stock({ loc, locs, user }) {
   const [rows, load, err] = useData("/stock" + (loc ? `?location_id=${loc}` : "")), [msg, setMsg] = useState("");
+  const canPO = user.perms.includes("*") || user.perms.includes("purchase");
+  const [pos, loadPO] = useData(canPO ? "/purchase-orders" : "/stock?location_id=0"), [sups] = useData(canPO ? "/suppliers" : "/stock?location_id=0");
+  const POS = ["DRAFT", "SENT", "CONFIRMED", "RECEIVED", "INVOICED", "PAID"];
+  const nextPO = async p => { await api(`/purchase-orders/${p.id}/status`, { method: "PUT", body: { status: POS[POS.indexOf(p.status) + 1] } }); loadPO(); load(); };
   async function po() { try { const r = await api(`/purchase-orders/from-low-stock/${loc || locs[0].id}`, { method: "POST" }); setMsg(`${r.length} draft purchase order(s) created`); } catch (x) { setMsg(x.message); } }
   return <><h1>Stock</h1><Err e={err} /><div className="row"><button className="p" onClick={po}>Create purchase orders for low stock</button><span className="mute">{msg}</span></div>
-    {rows && <Table cols={[["SKU", r => r.sku], ["Product", r => r.name], ["Location", r => locs.find(l => l.id === r.location_id)?.name], ["Qty", r => <span className={r.low ? "bad" : ""}>{r.quantity}</span>], ["Min", r => r.min_stock], ["", r => r.low && <Tag s="LOW STOCK" />]]} rows={rows} />}</>;
+    {rows && <Table cols={[["SKU", r => r.sku], ["Product", r => r.name], ["Location", r => locs.find(l => l.id === r.location_id)?.name], ["Qty", r => <span className={r.low ? "bad" : ""}>{r.quantity}</span>], ["Min", r => r.min_stock], ["", r => r.low && <Tag s="LOW STOCK" />]]} rows={rows} />}
+    {canPO && Array.isArray(pos) && pos.length > 0 && pos[0].supplier_id && <><h1 style={{ marginTop: 18 }}>Purchase orders</h1><Table cols={[["#", r => r.id], ["Supplier", r => sups?.find?.(x => x.id === r.supplier_id)?.name], ["Items", r => r.items.map(i => `#${i.product_id} ×${i.quantity}`).join(", ")], ["Status", r => <Tag s={r.status} />], ["", r => r.status !== "PAID" && <button className="s" onClick={() => nextPO(r)}>Mark {POS[POS.indexOf(r.status) + 1]}</button>]]} rows={pos} /></>}</>;
 }
 
 export function Audit() {

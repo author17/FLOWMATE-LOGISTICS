@@ -3,12 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..security import require
+from ..security import require, current_user
 from .. import models, audit
 
 def row(o): return {c.name: getattr(o, c.name) for c in o.__table__.columns}
 
-def make_router(prefix: str, model, area: str, fields: set[str]):
+def make_router(prefix: str, model, area: str, fields: set[str], read_area: str | None = None):
     r = APIRouter(prefix=f"/api/{prefix}", tags=[prefix])
 
     def clean(data: dict):
@@ -17,7 +17,7 @@ def make_router(prefix: str, model, area: str, fields: set[str]):
         return data
 
     @r.get("")
-    def list_(db: Session = Depends(get_db), user=Depends(require(area))):
+    def list_(db: Session = Depends(get_db), user=Depends(current_user if read_area == "any" else require(read_area or area))):
         return [row(o) for o in db.scalars(select(model).order_by(model.id))]
 
     @r.post("", status_code=201)
@@ -45,9 +45,10 @@ def make_router(prefix: str, model, area: str, fields: set[str]):
     return r
 
 routers = [
-    make_router("locations", models.Location, "settings_dummy", {"name", "kind"}),  # owner/admin only (not in any other role's perms)
-    make_router("customers", models.Customer, "customers", {"name", "email", "phone"}),
-    make_router("suppliers", models.Supplier, "suppliers", {"name", "email", "phone", "vat_number", "iban", "notes"}),
-    make_router("categories", models.Category, "products", {"name"}),
-    make_router("products", models.Product, "products", {"sku", "name", "category_id", "supplier_id", "purchase_cents", "sell_cents", "vat_percent", "min_stock", "max_stock"}),
+    make_router("locations", models.Location, "settings_dummy", {"name", "kind"}, read_area="any"),  # owner/admin only (not in any other role's perms)
+    make_router("customers", models.Customer, "orders", {"name", "email", "phone"}),
+    make_router("suppliers", models.Supplier, "suppliers", {"name", "email", "phone", "vat_number", "iban", "notes"}, read_area="invoices"),
+    make_router("categories", models.Category, "products", {"name"}, read_area="stock_read"),
+    make_router("products", models.Product, "products", {"sku", "name", "category_id", "supplier_id", "purchase_cents", "sell_cents", "vat_percent", "min_stock", "max_stock"}, read_area="stock_read"),
+    make_router("plans", models.Plan, "memberships_admin", {"name", "kind", "duration_days", "sessions", "price_cents", "active"}, read_area="memberships"),
 ]

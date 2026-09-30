@@ -17,3 +17,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"  # practice copy with fake data + banner
+
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")          # sk_test_... first, sk_live_... later
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")  # whsec_... from the Stripe webhook page
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")  # public https address of this app

@@ -28,6 +28,16 @@ def seed(db):
     db.add(models.BankAccount(name="Business account", iban="CY00DEMO", provider="sandbox", balance_cents=1245000))
     db.add(models.Customer(name="Maria Georgiou"))
     db.add(models.Invoice(supplier_id=sup.id, number="INV-5521", issue_date=date.today() - timedelta(days=10), due_date=date.today() + timedelta(days=5), total_cents=45000, vat_cents=7350))
+    plans = [models.Plan(name="Monthly membership", kind="membership", duration_days=30, price_cents=4500), models.Plan(name="3-month membership", kind="membership", duration_days=90, price_cents=11900),
+             models.Plan(name="10-class pack", kind="class_pack", duration_days=90, sessions=10, price_cents=6000), models.Plan(name="Personal training x5", kind="personal_training", duration_days=90, sessions=5, price_cents=20000)]
+    db.add_all(plans); db.flush()
+    from datetime import timedelta as td
+    m1 = models.Member(name="Andreas Constantinou", phone="99111222", location_id=locs[0].id); m2 = models.Member(name="Elena Petrou", phone="99333444", location_id=locs[0].id)
+    db.add_all([m1, m2]); db.flush()
+    s1 = models.Subscription(member_id=m1.id, plan_id=plans[0].id, location_id=locs[0].id, start_on=date.today() - td(days=25), end_on=date.today() + td(days=4), price_cents=4500)
+    s2 = models.Subscription(member_id=m2.id, plan_id=plans[1].id, location_id=locs[0].id, start_on=date.today() - td(days=10), end_on=date.today() + td(days=79), price_cents=11900)
+    db.add_all([s1, s2]); db.flush()
+    db.add(models.SubPayment(subscription_id=s1.id, amount_cents=4500, method="CASH", location_id=locs[0].id)); db.add(models.SubPayment(subscription_id=s2.id, amount_cents=5000, method="CARD", location_id=locs[0].id))
     db.commit()
 
 if __name__ == "__main__":

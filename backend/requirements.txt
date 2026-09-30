@@ -7,3 +7,5 @@ python-multipart
 httpx
 pytest
 psycopg[binary]
+openpyxl
+reportlab

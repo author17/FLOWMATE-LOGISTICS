@@ -256,3 +256,73 @@ class Delivery(Base):
     proof_document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id"), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+class Setting(Base):
+    __tablename__ = "settings"
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+# ---------------- Gym memberships ----------------
+class Plan(Base):
+    __tablename__ = "plans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    kind: Mapped[str] = mapped_column(String(20), default="membership")  # membership | class_pack | personal_training | day_pass
+    duration_days: Mapped[int] = mapped_column(Integer, default=30)
+    sessions: Mapped[int | None] = mapped_column(Integer, nullable=True)  # for packs; None = unlimited
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+class Member(Base):
+    __tablename__ = "members"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(150))
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    joined_on: Mapped[date] = mapped_column(Date, default=date.today)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
+    plan_id: Mapped[int] = mapped_column(ForeignKey("plans.id"))
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
+    start_on: Mapped[date] = mapped_column(Date)
+    end_on: Mapped[date] = mapped_column(Date)
+    price_cents: Mapped[int] = mapped_column(Integer)
+    sessions_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")  # ACTIVE | CANCELLED
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+class SubPayment(Base):
+    __tablename__ = "sub_payments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subscription_id: Mapped[int] = mapped_column(ForeignKey("subscriptions.id"))
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    method: Mapped[str] = mapped_column(String(20), default="CASH")  # CASH CARD BANK_TRANSFER ONLINE OTHER
+    paid_on: Mapped[date] = mapped_column(Date, default=date.today)
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
+
+class CheckIn(Base):
+    __tablename__ = "checkins"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id"))
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+class OnlinePayment(Base):
+    """Card payment taken through Stripe Checkout. Marked PAID only by a signature-verified Stripe webhook."""
+    __tablename__ = "online_payments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(120), unique=True)
+    target_type: Mapped[str] = mapped_column(String(20))  # order | subscription
+    target_id: Mapped[int] = mapped_column(Integer)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")  # PENDING PAID EXPIRED AMOUNT_MISMATCH
+    url: Mapped[str | None] = mapped_column(String(600), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
