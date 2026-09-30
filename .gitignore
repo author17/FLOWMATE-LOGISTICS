@@ -1,0 +1,8 @@
+node_modules/
+__pycache__/
+*.pyc
+*.db
+.env
+storage/*
+!storage/.gitkeep
+.pytest_cache/

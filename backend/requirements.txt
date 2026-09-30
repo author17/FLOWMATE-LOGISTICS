@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+sqlalchemy>=2.0
+pydantic>=2
+pyjwt
+python-multipart
+httpx
+pytest

@@ -1,0 +1,15 @@
+let token = localStorage.getItem("token");
+export const setToken = (t) => { token = t; t ? localStorage.setItem("token", t) : localStorage.removeItem("token"); };
+export const eur = (c) => (c / 100).toLocaleString("en-IE", { style: "currency", currency: "EUR" });
+export const cents = (s) => Math.round(parseFloat(String(s).replace(",", ".") || "0") * 100);
+
+export async function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (token) headers.Authorization = "Bearer " + token;
+  let body = opts.body;
+  if (body && !(body instanceof FormData) && !(body instanceof URLSearchParams)) { body = JSON.stringify(body); headers["Content-Type"] = "application/json"; }
+  const r = await fetch("/api" + path, { ...opts, headers, body });
+  if (r.status === 401 && token) { setToken(null); location.reload(); }
+  if (!r.ok) { let m = r.statusText; try { const j = await r.json(); m = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch {} throw new Error(m); }
+  return r.json();
+}

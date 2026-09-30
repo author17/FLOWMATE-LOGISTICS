@@ -1,0 +1,15 @@
+:root{--bg:#f5f6f8;--card:#fff;--ink:#1b1f24;--mute:#6b7380;--line:#e3e6ea;--accent:#1f6feb;--bad:#d1242f;--good:#1a7f37;--warn:#b36b00}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#181c22;--ink:#e8ebef;--mute:#8b95a3;--line:#2a3039;--accent:#58a6ff;--bad:#ff7b72;--good:#56d364;--warn:#e3b341}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,sans-serif}
+.app{display:flex;min-height:100vh}.side{width:200px;background:var(--card);border-right:1px solid var(--line);padding:12px;flex-shrink:0}
+.side h2{margin:4px 8px 12px;font-size:16px}.side button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--ink);padding:8px;border-radius:6px;cursor:pointer;font-size:14px}
+.side button.on,.side button:hover{background:var(--bg);font-weight:600}.main{flex:1;padding:20px;min-width:0}
+h1{font-size:20px;margin:0 0 14px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}.card .l{color:var(--mute);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+.card .v{font-size:22px;font-weight:600;margin-top:4px}table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}th{color:var(--mute);font-size:11px;text-transform:uppercase}
+button.p,.btn{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 12px;cursor:pointer}button.s{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
+input,select{padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.tag{padding:2px 8px;border-radius:10px;font-size:11px;background:var(--bg);border:1px solid var(--line)}.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.err{background:var(--bad);color:#fff;padding:8px 12px;border-radius:6px;margin-bottom:10px}.login{max-width:320px;margin:15vh auto;display:grid;gap:10px}
+.scroll{overflow-x:auto}.mute{color:var(--mute)}
