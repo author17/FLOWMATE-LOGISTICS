@@ -26,3 +26,8 @@ def verify_signature(payload: bytes, header: str, secret: str, tolerance: int = 
     if abs((now or time.time()) - int(t)) > tolerance: return False
     expected = hmac.new(secret.encode(), f"{t}.".encode() + payload, hashlib.sha256).hexdigest()
     return any(hmac.compare_digest(expected, s) for s in sigs)
+
+def refund(payment_intent: str, amount_cents: int) -> dict:
+    r = httpx.post(f"{API}/refunds", data={"payment_intent": payment_intent, "amount": str(amount_cents)}, headers={"Authorization": f"Bearer {config.STRIPE_SECRET_KEY}"}, timeout=30)
+    if r.status_code >= 400: raise RuntimeError(r.json().get("error", {}).get("message", "Stripe error"))
+    return r.json()

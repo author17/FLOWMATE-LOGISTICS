@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..security import require
+from ..security import require, scope_location
 from .. import models, audit
 from .crud import row
 
@@ -31,12 +31,14 @@ def order_out(o): return {**row(o), "items": [row(i) for i in o.items]}
 
 @router.get("/orders")
 def orders(location_id: int | None = None, db: Session = Depends(get_db), u=Depends(require("orders"))):
+    location_id = scope_location(u, location_id)
     q = select(models.Order).order_by(models.Order.id.desc())
     if location_id: q = q.where(models.Order.location_id == location_id)
     return [order_out(o) for o in db.scalars(q)]
 
 @router.post("/orders", status_code=201)
 def create_order(d: OrderIn, db: Session = Depends(get_db), u=Depends(require("orders"))):
+    d.location_id = scope_location(u, d.location_id) or d.location_id
     o = models.Order(location_id=d.location_id, customer_id=d.customer_id, source=d.source, payment_method=d.payment_method)
     total = 0
     for it in d.items:
@@ -54,7 +56,7 @@ class StatusIn(BaseModel): status: str
 
 @router.put("/orders/{id}/status")
 def order_status(id: int, d: StatusIn, db: Session = Depends(get_db), u=Depends(require("orders"))):
-    if d.status not in {"NEW", "PROCESSING", "COMPLETED", "PAID", "CANCELLED"}: raise HTTPException(422, "Bad status")
+    if d.status not in {"NEW", "PROCESSING", "COMPLETED", "PAID", "CANCELLED", "REFUNDED"}: raise HTTPException(422, "Bad status")
     o = db.get(models.Order, id)
     if not o: raise HTTPException(404)
     old = o.status; o.status = d.status
@@ -64,7 +66,7 @@ def order_status(id: int, d: StatusIn, db: Session = Depends(get_db), u=Depends(
 class InvoiceIn(BaseModel):
     supplier_id: int; number: str; issue_date: date; due_date: date | None = None
     total_cents: int; vat_cents: int = 0; location_id: int | None = None; document_id: int | None = None
-    items: list[Item] = []; add_to_stock: bool = False
+    items: list[Item] = []; add_to_stock: bool = False; purchase_order_id: int | None = None
 
 def invoice_out(i, db):
     s = db.get(models.Supplier, i.supplier_id)
@@ -84,6 +86,10 @@ def create_invoice(d: InvoiceIn, db: Session = Depends(get_db), u=Depends(requir
     for it in d.items:
         i.items.append(models.InvoiceItem(product_id=it.product_id, description=it.description, quantity=it.quantity, unit_cents=it.unit_cents or 0))
     db.add(i); db.flush()
+    po = db.get(models.PurchaseOrder, d.purchase_order_id) if d.purchase_order_id else None
+    if po:
+        if po.status == "RECEIVED": d.add_to_stock = False   # stock was already added when the goods were received
+        po.status = "INVOICED"
     if d.add_to_stock and d.location_id:
         for it in i.items:
             if it.product_id: adjust_stock(db, it.product_id, d.location_id, it.quantity, "purchase", f"INV-{i.number}")
@@ -113,9 +119,10 @@ def add_expense(d: ExpenseIn, db: Session = Depends(get_db), u=Depends(require("
 # ---------------- Stock & purchase orders ----------------
 @router.get("/stock")
 def stock(location_id: int | None = None, db: Session = Depends(get_db), u=Depends(require("stock_read"))):
+    location_id = scope_location(u, location_id)
     q = select(models.Stock, models.Product).join(models.Product, models.Stock.product_id == models.Product.id)
     if location_id: q = q.where(models.Stock.location_id == location_id)
-    return [{"product_id": p.id, "sku": p.sku, "name": p.name, "location_id": s.location_id, "quantity": s.quantity, "min_stock": p.min_stock, "low": s.quantity <= p.min_stock} for s, p in db.execute(q)]
+    return [{"product_id": p.id, "sku": p.sku, "name": p.name, "location_id": s.location_id, "quantity": s.quantity, "min_stock": p.min_stock, "max_stock": p.max_stock, "category_id": p.category_id, "low": s.quantity <= p.min_stock} for s, p in db.execute(q)]
 
 class AdjustIn(BaseModel): product_id: int; location_id: int; change: int; reason: str = "adjustment"
 

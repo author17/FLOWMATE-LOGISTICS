@@ -1,10 +1,18 @@
 """Database schema. Money is stored as integer cents to avoid rounding errors."""
 from datetime import datetime, date
-from sqlalchemy import String, Integer, ForeignKey, Text, DateTime, Date, Boolean, JSON
+from sqlalchemy import String, Integer, ForeignKey, Text, DateTime, Date, Boolean, JSON, TypeDecorator
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
 def now(): return datetime.utcnow()
+
+class EncStr(TypeDecorator):
+    """String encrypted at rest (Fernet). Old plain values still read fine and get encrypted the next time they are saved."""
+    impl = String(400); cache_ok = True
+    def process_bind_param(self, v, dialect):
+        from .crypto import encrypt; return encrypt(v)
+    def process_result_value(self, v, dialect):
+        from .crypto import decrypt; return decrypt(v)
 
 class Location(Base):
     __tablename__ = "locations"
@@ -22,6 +30,11 @@ class User(Base):
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
+    totp_secret: Mapped[str | None] = mapped_column(EncStr, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    recovery_codes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -37,7 +50,7 @@ class Supplier(Base):
     email: Mapped[str | None] = mapped_column(String(200), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     vat_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    iban: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    iban: Mapped[str | None] = mapped_column(EncStr, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 class Category(Base):
@@ -57,6 +70,7 @@ class Product(Base):
     vat_percent: Mapped[int] = mapped_column(Integer, default=19)
     min_stock: Mapped[int] = mapped_column(Integer, default=0)
     max_stock: Mapped[int] = mapped_column(Integer, default=0)
+    show_online: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class Stock(Base):
     """Current quantity of a product at a location."""
@@ -86,6 +100,8 @@ class Order(Base):
     payment_method: Mapped[str] = mapped_column(String(20), default="BANK_TRANSFER")  # CASH CARD BANK_TRANSFER ONLINE OTHER
     total_cents: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    external_ref: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
     items: Mapped[list["OrderItem"]] = relationship(cascade="all, delete-orphan")
 
 class OrderItem(Base):
@@ -106,6 +122,14 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(20), default="NEEDS_REVIEW")  # NEEDS_REVIEW|VERIFIED
     extracted: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
+    company: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    doc_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    related_order_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    related_invoice_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    related_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(30), nullable=True)  # upload | scan | email
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 class Invoice(Base):
@@ -121,6 +145,9 @@ class Invoice(Base):
     vat_cents: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="UNPAID")  # UNPAID|PAYMENT_PENDING|PAID
     document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id"), nullable=True)
+    purchase_order_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    paid_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    paid_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
     items: Mapped[list["InvoiceItem"]] = relationship(cascade="all, delete-orphan")
 
 class InvoiceItem(Base):
@@ -186,6 +213,11 @@ class BankAccount(Base):
     iban: Mapped[str | None] = mapped_column(String(50), nullable=True)
     provider: Mapped[str] = mapped_column(String(30), default="csv")  # csv | openbanking providers added later
     balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+    available_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    connection_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    external_uid: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    balance_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
 
 class BankTransaction(Base):
@@ -198,6 +230,8 @@ class BankTransaction(Base):
     reference: Mapped[str] = mapped_column(String(300), default="")
     counterparty: Mapped[str] = mapped_column(String(200), default="")
     match_status: Mapped[str] = mapped_column(String(20), default="UNMATCHED")  # UNMATCHED|SUGGESTED|RECONCILED
+    category: Mapped[str | None] = mapped_column(String(20), nullable=True)  # EXPENSE|BANK_FEE|TRANSFER|OTHER_INCOME|REFUND when classified by hand
+    expense_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 class PaymentMatch(Base):
@@ -242,6 +276,7 @@ class Notification(Base):
     kind: Mapped[str] = mapped_column(String(50))
     message: Mapped[str] = mapped_column(String(300))
     read: Mapped[bool] = mapped_column(Boolean, default=False)
+    emailed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 class Delivery(Base):
@@ -255,6 +290,7 @@ class Delivery(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     proof_document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id"), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    eta: Mapped[str | None] = mapped_column(String(5), nullable=True)   # expected arrival HH:MM
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 class Setting(Base):
@@ -326,3 +362,33 @@ class OnlinePayment(Base):
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payment_intent: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+class Refund(Base):
+    __tablename__ = "refunds"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    method: Mapped[str] = mapped_column(String(20), default="CASH")  # how the money went back; ONLINE = via Stripe
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+class BankConnection(Base):
+    """One consent given by the business to read a bank's data through an Open Banking provider."""
+    __tablename__ = "bank_connections"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(30))            # enablebanking | demo
+    institution: Mapped[str] = mapped_column(String(120))
+    country: Mapped[str] = mapped_column(String(2), default="CY")
+    psu_type: Mapped[str] = mapped_column(String(10), default="business")
+    state: Mapped[str | None] = mapped_column(String(80), nullable=True)   # one-time value that ties the bank's redirect back to this row
+    authorization_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")  # PENDING ACTIVE EXPIRED ERROR DISCONNECTED
+    consent_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    warned_expiry: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)

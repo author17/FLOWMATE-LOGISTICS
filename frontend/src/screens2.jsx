@@ -1,27 +1,38 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { api, eur, cents, download } from "./api.js";
 import { useData, Err, Tag, Table, Card, PayLink } from "./ui.jsx";
+import { BankConnections } from "./bank.jsx";
+import { Security } from "./screens3.jsx";
 
 export function Customers() {
-  const [rows, load, err] = useData("/customers"), [f, setF] = useState({ name: "", email: "", phone: "" }), [e2, setE2] = useState("");
+  const [q, setQ] = useState(""), [rows, load, err] = useData("/customers" + (q ? `?q=${encodeURIComponent(q)}` : "")), [f, setF] = useState({ name: "", email: "", phone: "" }), [e2, setE2] = useState(""), [open, setOpen] = useState(null);
   const add = async () => { try { await api("/customers", { method: "POST", body: f }); setF({ name: "", email: "", phone: "" }); setE2(""); load(); } catch (x) { setE2(x.message); } };
-  return <><h1>Customers</h1><Err e={err || e2} /><div className="row">{["name", "email", "phone"].map(k => <input key={k} placeholder={k} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} />)}<button className="p" disabled={!f.name} onClick={add}>Add customer</button></div>
-    {rows && <Table cols={[["Name", r => r.name], ["Email", r => r.email], ["Phone", r => r.phone]]} rows={rows} />}</>;
+  if (open) return <CustomerProfile id={open} onBack={() => setOpen(null)} />;
+  return <><h1>Customers</h1><Err e={err || e2} /><div className="row"><input placeholder="Search customers…" value={q} onChange={e => setQ(e.target.value)} /></div>
+    <div className="row">{["name", "email", "phone"].map(k => <input key={k} placeholder={k} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} />)}<button className="p" disabled={!f.name} onClick={add}>Add customer</button></div>
+    {rows && <Table cols={[["Name", r => <a href="#" onClick={e => { e.preventDefault(); setOpen(r.id); }}>{r.name}</a>], ["Email", r => r.email], ["Phone", r => r.phone]]} rows={rows} />}</>;
+}
+function CustomerProfile({ id, onBack }) {
+  const [p, , err] = useData(`/customers/${id}/profile`);
+  if (!p) return <><Err e={err} /><p>Loading…</p></>;
+  return <><button className="s" onClick={onBack}>← Customers</button><h1 style={{ marginTop: 10 }}>{p.customer.name}</h1><p className="mute">{p.customer.email} {p.customer.phone}</p>
+    <div className="cards"><Card l="Paid" v={eur(p.paid_cents)} cls="good" /><Card l="Owes" v={eur(p.owed_cents)} cls={p.owed_cents ? "warn" : ""} /><Card l="Refunded" v={eur(p.refunded_cents)} /></div>
+    <Table cols={[["#", r => r.id], ["Date", r => r.created_at?.slice(0, 10)], ["Items", r => r.items.map(i => `${i.description} ×${i.quantity}`).join(", ")], ["Total", r => eur(r.total_cents)], ["Status", r => <Tag s={r.status} />]]} rows={p.orders} /></>;
 }
 
 export function Products({ user }) {
-  const [rows, load, err] = useData("/products"), [sups] = useData("/suppliers"), [stock] = useData("/stock"), [e2, setE2] = useState("");
+  const [rows, load, err] = useData("/products"), [sups] = useData("/suppliers"), [stock] = useData("/stock"), [cats, loadCats] = useData("/categories"), [e2, setE2] = useState("");
   const edit = user.perms.includes("*") || user.perms.includes("products");
-  const [f, setF] = useState({ sku: "", name: "", purchase: "", sell: "", vat: "19", min: "0", sup: "" });
-  const add = async () => { try { await api("/products", { method: "POST", body: { sku: f.sku, name: f.name, purchase_cents: cents(f.purchase), sell_cents: cents(f.sell), vat_percent: +f.vat, min_stock: +f.min, supplier_id: f.sup ? +f.sup : null } }); setF({ sku: "", name: "", purchase: "", sell: "", vat: "19", min: "0", sup: "" }); setE2(""); load(); } catch (x) { setE2(x.message); } };
+  const [f, setF] = useState({ sku: "", name: "", purchase: "", sell: "", vat: "19", min: "0", max: "0", cat: "", sup: "" });
+  const add = async () => { try { await api("/products", { method: "POST", body: { sku: f.sku, name: f.name, purchase_cents: cents(f.purchase), sell_cents: cents(f.sell), vat_percent: +f.vat, min_stock: +f.min, max_stock: +f.max, category_id: f.cat ? +f.cat : null, supplier_id: f.sup ? +f.sup : null } }); setF({ sku: "", name: "", purchase: "", sell: "", vat: "19", min: "0", max: "0", cat: "", sup: "" }); setE2(""); load(); } catch (x) { setE2(x.message); } };
   const qty = id => (stock || []).filter(s => s.product_id === id).reduce((a, s) => a + s.quantity, 0);
   const price = async (p) => { const v = prompt("New selling price in EUR", (p.sell_cents / 100).toFixed(2)); if (v) { await api(`/products/${p.id}`, { method: "PUT", body: { sell_cents: cents(v) } }); load(); } };
-  return <><h1>Products</h1><Err e={err || e2} />
+  return <><h1>Products</h1><Err e={err || e2} />{edit && <div className="row"><button className="s" onClick={async () => { const n = prompt("New category name"); if (n) { await api("/categories", { method: "POST", body: { name: n } }); loadCats(); } }}>+ Category</button></div>}
     {edit && <div className="row"><input placeholder="SKU" style={{ width: 90 }} value={f.sku} onChange={e => setF({ ...f, sku: e.target.value })} /><input placeholder="Name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
       <input placeholder="Cost €" style={{ width: 80 }} value={f.purchase} onChange={e => setF({ ...f, purchase: e.target.value })} /><input placeholder="Price €" style={{ width: 80 }} value={f.sell} onChange={e => setF({ ...f, sell: e.target.value })} />
-      <input placeholder="VAT %" style={{ width: 70 }} value={f.vat} onChange={e => setF({ ...f, vat: e.target.value })} /><input placeholder="Min stock" style={{ width: 90 }} value={f.min} onChange={e => setF({ ...f, min: e.target.value })} />
+      <input placeholder="VAT %" style={{ width: 70 }} value={f.vat} onChange={e => setF({ ...f, vat: e.target.value })} /><input placeholder="Min stock" style={{ width: 90 }} value={f.min} onChange={e => setF({ ...f, min: e.target.value })} /><input placeholder="Max stock" style={{ width: 90 }} value={f.max} onChange={e => setF({ ...f, max: e.target.value })} /><select value={f.cat} onChange={e => setF({ ...f, cat: e.target.value })}><option value="">Category…</option>{(cats || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       <select value={f.sup} onChange={e => setF({ ...f, sup: e.target.value })}><option value="">Supplier…</option>{(sups || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select><button className="p" disabled={!f.sku || !f.name} onClick={add}>Add product</button></div>}
-    {rows && <Table cols={[["SKU", r => r.sku], ["Name", r => r.name], ["Cost", r => eur(r.purchase_cents)], ["Price", r => eur(r.sell_cents)], ["VAT", r => r.vat_percent + "%"], ["In stock", r => qty(r.id)], ["Min", r => r.min_stock], ["", r => edit && <button className="s" onClick={() => price(r)}>Change price</button>]]} rows={rows} />}</>;
+    {rows && <Table cols={[["SKU", r => r.sku], ["Name", r => r.name], ["Cost", r => eur(r.purchase_cents)], ["Price", r => eur(r.sell_cents)], ["VAT", r => r.vat_percent + "%"], ["In stock", r => qty(r.id)], ["Min", r => r.min_stock], ["Max", r => r.max_stock || "—"], ["Online", r => <input type="checkbox" disabled={!edit} checked={!!r.show_online} onChange={async e => { await api(`/products/${r.id}`, { method: "PUT", body: { show_online: e.target.checked } }); load(); }} />], ["", r => edit && <button className="s" onClick={() => price(r)}>Change price</button>]]} rows={rows} />}</>;
 }
 
 export function Expenses({ locs }) {
@@ -64,7 +75,7 @@ export function Members({ loc, locs, user }) {
 }
 
 export function Reports({ locs }) {
-  const LIST = [["sales", "Sales"], ["pnl", "Profit / loss estimate"], ["expenses", "Expenses by category"], ["suppliers", "Supplier spending"], ["outstanding", "Outstanding invoices"], ["customers", "Customer payments"], ["bank", "Bank transactions"], ["cashflow", "Cash flow"], ["vat", "VAT summary"], ["stock", "Stock value"], ["products", "Product sales"], ["shifts", "Cash-up differences"]];
+  const LIST = [["sales", "Sales"], ["ledger", "Accounting ledger (journal)"], ["pnl", "Profit / loss estimate"], ["expenses", "Expenses by category"], ["suppliers", "Supplier spending"], ["outstanding", "Outstanding invoices"], ["customers", "Customer payments"], ["bank", "Bank transactions"], ["cashflow", "Cash flow"], ["vat", "VAT summary"], ["stock", "Stock value"], ["products", "Product sales"], ["shifts", "Cash-up differences"]];
   const today = new Date(), m0 = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10), t0 = today.toISOString().slice(0, 10);
   const [f, setF] = useState({ name: "sales", from: m0, to: t0, loc: "", period: "day" }), [data, setData] = useState(null), [err, setErr] = useState("");
   const qs = fmt => `/reports/${f.name}?` + new URLSearchParams({ fmt, date_from: f.from, date_to: f.to, period: f.period, ...(f.loc && { location_id: f.loc }) });
@@ -89,23 +100,41 @@ export function Assistant() {
 
 export function Users({ locs }) {
   const [rows, load, err] = useData("/users"), [e2, setE2] = useState(""), ROLES = ["owner", "manager", "employee", "accountant", "bank_payment", "driver", "admin"];
-  const [f, setF] = useState({ name: "", email: "", password: "", role: "employee", location_id: "" });
+  const [f, setF] = useState({ name: "", email: "", password: "", role: "employee", location_id: "", phone: "" });
   const run = fn => async (...a) => { try { await fn(...a); setE2(""); load(); } catch (x) { setE2(x.message); } };
-  const add = run(async () => { await api("/users", { method: "POST", body: { ...f, location_id: f.location_id ? +f.location_id : null } }); setF({ name: "", email: "", password: "", role: "employee", location_id: "" }); });
+  const add = run(async () => { await api("/users", { method: "POST", body: { ...f, location_id: f.location_id ? +f.location_id : null } }); setF({ name: "", email: "", password: "", role: "employee", location_id: "", phone: "" }); });
   const edit = run((id, b) => api(`/users/${id}`, { method: "PUT", body: b }));
   const reset = run(async id => { const p = prompt("Temporary password (10+ characters). The user must change it at next login."); if (p) await api(`/users/${id}/reset-password`, { method: "POST", body: { temp_password: p } }); });
-  return <><h1>Users & permissions</h1><Err e={err || e2} /><div className="row"><input placeholder="Name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} /><input placeholder="Email" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} />
+  return <><h1>Users & permissions</h1><Err e={err || e2} /><div className="row"><input placeholder="Name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} /><input placeholder="Email" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /><input placeholder="Phone" value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} style={{ width: 130 }} />
     <input placeholder="Temporary password (10+)" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} /><select value={f.role} onChange={e => setF({ ...f, role: e.target.value })}>{ROLES.map(r => <option key={r}>{r}</option>)}</select>
     <select value={f.location_id} onChange={e => setF({ ...f, location_id: e.target.value })}><option value="">All locations</option>{locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select><button className="p" disabled={!f.name || !f.email || f.password.length < 10} onClick={add}>Add user</button></div>
-    {rows && <Table cols={[["Name", r => r.name], ["Email", r => r.email], ["Role", r => <select value={r.role} onChange={e => edit(r.id, { role: e.target.value })}>{ROLES.map(x => <option key={x}>{x}</option>)}</select>], ["Active", r => <input type="checkbox" checked={r.active} onChange={e => edit(r.id, { active: e.target.checked })} />], ["", r => <button className="s" onClick={() => reset(r.id)}>Reset password</button>]]} rows={rows} />}
+    {rows && <Table cols={[["Name", r => r.name], ["Email", r => r.email], ["Phone", r => <input defaultValue={r.phone || ""} style={{ width: 120 }} onBlur={e => e.target.value !== (r.phone || "") && edit(r.id, { phone: e.target.value })} />], ["Role", r => <select value={r.role} onChange={e => edit(r.id, { role: e.target.value })}>{ROLES.map(x => <option key={x}>{x}</option>)}</select>], ["Active", r => <input type="checkbox" checked={r.active} onChange={e => edit(r.id, { active: e.target.checked })} />], ["", r => <button className="s" onClick={() => reset(r.id)}>Reset password</button>]]} rows={rows} />}
     <p className="mute">Roles: owner/admin everything · manager operations & reports · employee orders, cash-up, members · accountant finance & reports · bank_payment prepares payments · driver own deliveries only.</p></>;
 }
 
-export function Settings({ user }) {
+export function Settings({ user, reload }) {
   const [s, load, err] = useData("/settings"), [st] = useData("/stripe/status"), [f, setF] = useState(null), [msg, setMsg] = useState("");
-  useEffect(() => { if (s && !f) setF({ company_name: s.company_name, vat_number: s.vat_number }); }, [s]);
+  useEffect(() => { if (s && !f) setF({ company_name: s.company_name, vat_number: s.vat_number, company_email: s.company_email, company_address: s.company_address, public_orders_enabled: s.public_orders_enabled }); }, [s]);
   const save = async () => { await api("/settings", { method: "PUT", body: f }); setMsg("Saved"); load(); };
-  return <><h1>Settings</h1><Err e={err} />{f && <div className="row"><input placeholder="Company name" value={f.company_name} onChange={e => setF({ ...f, company_name: e.target.value })} /><input placeholder="VAT number" value={f.vat_number} onChange={e => setF({ ...f, vat_number: e.target.value })} /><button className="p" onClick={save}>Save</button><span className="mute">{msg}</span></div>}
-    <h1 style={{ fontSize: 16 }}>Connections</h1>{s && st && <Table cols={[["Service", r => r[0]], ["Status", r => r[1]]]} rows={[["Card payments (Stripe)", st.configured ? `ON (${st.mode} mode)${st.webhook_configured ? "" : " - webhook secret missing"}` : "OFF - add STRIPE_SECRET_KEY"], ["Stripe webhook address", st.webhook_url], ["Receipt reading (OCR)", s.ocr_provider === "claude" ? "ON" : "OFF - manual entry (set OCR_PROVIDER=claude)"], ["Bank", "Statement CSV import (live bank link not connected)"], ["Mode", s.demo ? "PRACTICE (fake data)" : "REAL"]].map((r, i) => ({ id: i, 0: r[0], 1: r[1] }))} />}
-    <p className="mute" style={{ marginTop: 12 }}>Exports of all your data: Reports page (PDF/Excel/CSV). Full-table CSV exports are at /api/export/&lt;name&gt;.csv for owners.</p></>;
+  return <><h1>Settings</h1><Err e={err} />{f && <><div className="row"><input placeholder="Company name" value={f.company_name} onChange={e => setF({ ...f, company_name: e.target.value })} /><input placeholder="VAT number" value={f.vat_number} onChange={e => setF({ ...f, vat_number: e.target.value })} />
+      <input placeholder="Company e-mail" value={f.company_email} onChange={e => setF({ ...f, company_email: e.target.value })} /><input placeholder="Address" value={f.company_address} onChange={e => setF({ ...f, company_address: e.target.value })} /></div>
+      <div className="row"><label><input type="checkbox" checked={f.public_orders_enabled} onChange={e => setF({ ...f, public_orders_enabled: e.target.checked })} /> Let customers order online (public page: <code>/order</code>; choose the products in Products → "Online")</label><button className="p" onClick={save}>Save</button><span className="mute">{msg}</span></div></>}
+    <BankConnections />
+    <Security user={user} reload={reload} />
+    <Plans />
+    <h1 style={{ fontSize: 16, marginTop: 18 }}>Connections</h1>{s && st && <Table cols={[["Service", r => r[0]], ["Status", r => r[1]]]} rows={[["Card payments (Stripe)", st.configured ? `ON (${st.mode} mode)${st.webhook_configured ? "" : " - webhook secret missing"}` : "OFF - add STRIPE_SECRET_KEY"], ["Stripe webhook address", st.webhook_url], ["Receipt reading (OCR)", s.ocr_provider === "claude" ? "ON" : "OFF - manual entry (set OCR_PROVIDER=claude)"], ["Mode", s.demo ? "PRACTICE (fake data)" : "REAL"]].map((r, i) => ({ id: i, 0: r[0], 1: r[1] }))} />}
+    <p className="mute" style={{ marginTop: 12 }}>Backups and full data export: the Data page.</p></>;
+}
+
+function Plans() {
+  const [rows, load, err] = useData("/plans"), [e2, setE2] = useState(""), [f, setF] = useState({ name: "", kind: "membership", days: "30", sessions: "", price: "" });
+  const KINDS = [["membership", "Membership"], ["class_pack", "Class pack"], ["personal_training", "Personal training"], ["day_pass", "Day pass"]];
+  const run = fn => async (...a) => { try { await fn(...a); setE2(""); load(); } catch (x) { setE2(x.message); } };
+  const add = run(async () => { await api("/plans", { method: "POST", body: { name: f.name, kind: f.kind, duration_days: +f.days, sessions: f.sessions ? +f.sessions : null, price_cents: cents(f.price) } }); setF({ name: "", kind: "membership", days: "30", sessions: "", price: "" }); });
+  const toggle = run((p) => api(`/plans/${p.id}`, { method: "PUT", body: { active: !p.active } }));
+  return <><h1 style={{ fontSize: 16, marginTop: 18 }}>Membership plans & packages</h1><Err e={err || e2} />
+    <div className="row"><input placeholder="Name (e.g. Monthly)" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} /><select value={f.kind} onChange={e => setF({ ...f, kind: e.target.value })}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+      <input placeholder="Valid days" style={{ width: 90 }} value={f.days} onChange={e => setF({ ...f, days: e.target.value })} /><input placeholder="Sessions (packs)" style={{ width: 120 }} value={f.sessions} onChange={e => setF({ ...f, sessions: e.target.value })} />
+      <input placeholder="Price €" style={{ width: 90 }} value={f.price} onChange={e => setF({ ...f, price: e.target.value })} /><button className="p" disabled={!f.name || !f.price || !+f.days} onClick={add}>Add plan</button></div>
+    {rows && <Table cols={[["Plan", r => r.name], ["Type", r => r.kind], ["Days", r => r.duration_days], ["Sessions", r => r.sessions ?? "unlimited"], ["Price", r => eur(r.price_cents)], ["Active", r => <input type="checkbox" checked={r.active} onChange={() => toggle(r)} />]]} rows={rows} />}</>;
 }

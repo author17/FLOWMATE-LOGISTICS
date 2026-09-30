@@ -8,6 +8,7 @@ from ..db import get_db
 from ..security import require
 from .. import models
 from .crud import row
+from ..dates import on_day, since, before
 
 router = APIRouter(prefix="/api", tags=["reports"])
 REVENUE = ("COMPLETED", "PAID", "PROCESSING", "NEW")
@@ -20,21 +21,31 @@ def dashboard(location_id: int | None = None, db: Session = Depends(get_db), u=D
     O, E, I = models.Order, models.Expense, models.Invoice
     of = [O.location_id == location_id] if location_id else []
     ef = [E.location_id == location_id] if location_id else []
-    sales_today = _sum(db, O.total_cents, func.date(O.created_at) == today.isoformat(), O.status != "CANCELLED", *of)
-    sales_month = _sum(db, O.total_cents, func.date(O.created_at) >= m0.isoformat(), O.status != "CANCELLED", *of)
+    sales_today = _sum(db, O.total_cents, on_day(O.created_at, today), O.status != "CANCELLED", *of)
+    sales_month = _sum(db, O.total_cents, since(O.created_at, m0), O.status != "CANCELLED", *of)
     SP = models.SubPayment
     sf = [SP.location_id == location_id] if location_id else []
     sales_today += _sum(db, SP.amount_cents, SP.paid_on == today, *sf)
     sales_month += _sum(db, SP.amount_cents, SP.paid_on >= m0, *sf)
+    sales_today -= _sum(db, models.Refund.amount_cents, on_day(models.Refund.created_at, today))
+    sales_month -= _sum(db, models.Refund.amount_cents, since(models.Refund.created_at, m0))
     exp_today = _sum(db, E.amount_cents, E.spent_on == today, *ef)
     exp_month = _sum(db, E.amount_cents, E.spent_on >= m0, *ef)
     unpaid = db.execute(select(func.count(), func.coalesce(func.sum(I.total_cents), 0)).where(I.status != "PAID")).one()
     low = db.scalar(select(func.count()).select_from(models.Stock).join(models.Product, models.Stock.product_id == models.Product.id).where(models.Stock.quantity <= models.Product.min_stock))
     bal = _sum(db, models.BankAccount.balance_cents)
     recent = [row(t) for t in db.scalars(select(models.BankTransaction).order_by(models.BankTransaction.booked_on.desc()).limit(8))]
+    tx_in = _sum(db, models.BankTransaction.amount_cents, models.BankTransaction.booked_on == today, models.BankTransaction.amount_cents > 0)
+    tx_out = -_sum(db, models.BankTransaction.amount_cents, models.BankTransaction.booked_on == today, models.BankTransaction.amount_cents < 0)
+    pend = db.execute(select(func.count(), func.coalesce(func.sum(I.total_cents), 0)).where(I.status == "PAYMENT_PENDING")).one()
+    by_day = []
+    for k in range(13, -1, -1):
+        d0 = today - timedelta(days=k)
+        s = _sum(db, O.total_cents, on_day(O.created_at, d0), O.status != "CANCELLED", *of) + _sum(db, SP.amount_cents, SP.paid_on == d0, *sf)
+        by_day.append({"day": d0.isoformat(), "sales_cents": s})
     by_loc = []
     for l in db.scalars(select(models.Location)):
-        s = _sum(db, O.total_cents, func.date(O.created_at) >= m0.isoformat(), O.status != "CANCELLED", O.location_id == l.id)
+        s = _sum(db, O.total_cents, since(O.created_at, m0), O.status != "CANCELLED", O.location_id == l.id)
         s += _sum(db, SP.amount_cents, SP.paid_on >= m0, SP.location_id == l.id)
         e = _sum(db, E.amount_cents, E.spent_on >= m0, E.location_id == l.id)
         by_loc.append({"location": l.name, "sales_cents": s, "expenses_cents": e, "profit_cents": s - e})
@@ -45,7 +56,7 @@ def dashboard(location_id: int | None = None, db: Session = Depends(get_db), u=D
             "unmatched_payments": db.scalar(select(func.count()).select_from(models.BankTransaction).where(models.BankTransaction.match_status != "RECONCILED")),
             "deliveries_active": db.scalar(select(func.count()).select_from(models.Delivery).where(models.Delivery.status.in_(["PREPARED", "ON_THE_WAY"]))),
             "deliveries_failed": db.scalar(select(func.count()).select_from(models.Delivery).where(models.Delivery.status == "FAILED")),
-            "recent_transactions": recent, "by_location": by_loc}
+            "incoming_today_cents": tx_in, "outgoing_today_cents": tx_out, "pending_payments": pend[0], "pending_payments_cents": pend[1], "sales_by_day": by_day, "recent_transactions": recent, "by_location": by_loc}
 
 @router.get("/notifications")
 def notes(db: Session = Depends(get_db), u=Depends(require("reports"))):

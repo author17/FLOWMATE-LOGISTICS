@@ -5,7 +5,7 @@ Orders → Stock → Documents → Suppliers → Payments → Delivery → Banki
 
 *From the first order to the final payment — FLOWMATE keeps everything connected.*
 
-(v0.4 - all blueprint modules have screens; see docs/ROADMAP.md for what is still open.)
+(v0.5 - all blueprint modules have screens; see docs/ROADMAP.md for what is still open.)
 
 Stack: Python FastAPI + SQLAlchemy (SQLite now, PostgreSQL later) + React (Vite).
 
@@ -46,3 +46,7 @@ See docs/DEPLOY.md (Dockerfile, docker-compose.yml, render.yaml included). Pract
 
 ## v0.4 adds
 Gym memberships (plans, members, check-in, renewals, balances), 12 reports as PDF/Excel/CSV, Stripe card payment links, business assistant, user management, settings, notifications bell, customers/products/expenses/purchase-order screens, installable phone app (PWA), real-system bootstrap via BOOTSTRAP_* variables.
+
+
+## Live bank feed
+See docs/BANKING.md. Optional environment variables added in v0.5: SMTP_HOST/PORT/USER/PASS/FROM (e-mail alerts & purchase orders), INBOUND_EMAIL_TOKEN (forward supplier invoices by e-mail), ENABLEBANKING_APP_ID/ENABLEBANKING_PRIVATE_KEY, BANK_SYNC_HOURS, REQUIRE_MFA_ROLES.

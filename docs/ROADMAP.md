@@ -10,3 +10,10 @@ Still open (honest list):
 5. Object storage (S3) for documents; automated backups; invoice line items editing in UI; stock transfer between locations.
 6. Accountant review: VAT rates per product, cash-register rules, Cyprus e-invoicing requirements.
 7. Native Android/iOS apps (the installable web app works on phones now).
+
+
+## v0.5 (done)
+Bank connection portal, payment approval flow, MFA, location scoping, document library, stock transfer/movements, purchase orders (PDF/e-mail), till CSV import, public order page, inbound e-mail, nightly backups/exports, due-date reminders + e-mail alerts, dashboard graph.
+
+## Not built yet
+Multi-tenant SaaS (one deployment per customer today), push notifications, native till integration, payment initiation (needs licence).

@@ -21,3 +21,12 @@ DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"  # practice copy with fake data +
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")          # sk_test_... first, sk_live_... later
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")  # whsec_... from the Stripe webhook page
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")  # public https address of this app
+
+# Open Banking (Enable Banking). Either set these here, or the owner pastes them in Settings -> Bank connections.
+ENABLEBANKING_APP_ID = os.getenv("ENABLEBANKING_APP_ID", "")
+ENABLEBANKING_PRIVATE_KEY = os.getenv("ENABLEBANKING_PRIVATE_KEY", "").replace("\\n", "\n")
+BANK_SYNC_HOURS = float(os.getenv("BANK_SYNC_HOURS", "6"))   # 0 turns automatic sync off
+DISABLE_SCHEDULER = os.getenv("DISABLE_SCHEDULER", "0") == "1"
+REQUIRE_MFA_ROLES = {r.strip() for r in os.getenv("REQUIRE_MFA_ROLES", "owner,admin,bank_payment").split(",") if r.strip()}
+SMTP_HOST = os.getenv("SMTP_HOST", ""); SMTP_PORT = int(os.getenv("SMTP_PORT", "587")); SMTP_USER = os.getenv("SMTP_USER", ""); SMTP_PASS = os.getenv("SMTP_PASS", ""); SMTP_FROM = os.getenv("SMTP_FROM", "")
+INBOUND_EMAIL_TOKEN = os.getenv("INBOUND_EMAIL_TOKEN", "")

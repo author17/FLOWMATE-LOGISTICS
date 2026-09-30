@@ -66,20 +66,40 @@ def confirm(id: int, db: Session = Depends(get_db), u=Depends(require("banking_a
     if not t or not m: raise HTTPException(404, "No suggestion to confirm")
     m.confirmed = True; t.match_status = "RECONCILED"
     tgt = db.get(models.Order if m.target_type == "order" else models.Invoice, m.target_id); tgt.status = "PAID"
+    if m.target_type == "invoice": tgt.paid_on, tgt.paid_method = t.booked_on, "BANK_TRANSFER"; payments.complete_by_statement(db, tgt.id, u)
     audit.log(db, u, "confirm_match", "bank_transaction", id, None, {"target": m.target_type, "id": m.target_id}); db.commit(); return row(t)
 
 # ---------- payments (outgoing) ----------
 @router.get("/payments")
 def pays(db: Session = Depends(get_db), u=Depends(require("banking_read"))):
-    return [row(p) for p in db.scalars(select(models.PaymentRequest).order_by(models.PaymentRequest.id.desc()))]
+    out = []
+    for p in db.scalars(select(models.PaymentRequest).order_by(models.PaymentRequest.id.desc())):
+        i = db.get(models.Invoice, p.invoice_id); s = db.get(models.Supplier, i.supplier_id) if i else None; by = db.get(models.User, p.created_by)
+        out.append({**row(p), "invoice_number": i.number if i else "", "supplier": s.name if s else "", "prepared_by": by.name if by else ""})
+    return out
 
 class PayIn(BaseModel): invoice_id: int; account_id: int
 
 @router.post("/payments", status_code=201)
 def pay(d: PayIn, db: Session = Depends(get_db), u=Depends(require("payments"))):
+    """Prepare a supplier payment (waits for the owner's approval)."""
     inv, acc = db.get(models.Invoice, d.invoice_id), db.get(models.BankAccount, d.account_id)
     if not inv or not acc: raise HTTPException(404)
-    pr = payments.create_payment(db, inv, acc, u); db.commit(); return row(pr)
+    pr = payments.prepare_payment(db, inv, acc, u); db.commit(); return row(pr)
+
+@router.post("/payments/{id}/approve")
+def approve(id: int, db: Session = Depends(get_db), u=Depends(require("payments_approve"))):
+    pr = db.get(models.PaymentRequest, id)
+    if not pr: raise HTTPException(404)
+    payments.approve_payment(db, pr, u); db.commit(); return row(pr)
+
+class Why(BaseModel): reason: str = ""
+
+@router.post("/payments/{id}/reject")
+def reject(id: int, d: Why, db: Session = Depends(get_db), u=Depends(require("payments_approve"))):
+    pr = db.get(models.PaymentRequest, id)
+    if not pr: raise HTTPException(404)
+    payments.reject_payment(db, pr, u, d.reason); db.commit(); return row(pr)
 
 @router.post("/payments/{id}/refresh")
 def refresh(id: int, db: Session = Depends(get_db), u=Depends(require("payments"))):

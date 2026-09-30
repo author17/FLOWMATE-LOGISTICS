@@ -16,3 +16,5 @@ input,select{padding:7px;border:1px solid var(--line);border-radius:6px;backgrou
 .logo2{padding:0 8px 10px;font-size:11px}.who{padding:8px;margin-top:10px}.pop{position:absolute;right:0;top:38px;width:min(360px,90vw);z-index:5;max-height:70vh;overflow:auto}
 a.btn{text-decoration:none;display:inline-block}
 @media(max-width:760px){.app{flex-direction:column}.side{width:100%;border-right:0;border-bottom:1px solid var(--line);padding:8px}.tabs{display:flex;overflow-x:auto;gap:4px}.tabs button{white-space:nowrap;width:auto}.main{padding:12px}h1{font-size:18px}.who{display:none}}
+
+.grp{font-size:10px;letter-spacing:.08em;padding:10px 8px 2px}.srch{position:relative}.srch .pop{left:0;right:auto;top:36px;width:min(380px,90vw)}.srch .hit{display:block;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:6px 0;cursor:pointer;color:var(--ink);font:inherit}

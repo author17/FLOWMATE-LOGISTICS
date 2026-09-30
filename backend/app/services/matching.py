@@ -30,7 +30,7 @@ def apply_match(db, tx, target_type, target_id, confidence, reason, user=None, c
             o = db.get(models.Order, target_id); old = o.status; o.status = "PAID"
             audit.log(db, user, "order_paid_by_bank_match", "order", o.id, {"status": old}, {"status": "PAID", "tx": tx.id})
         elif target_type == "invoice":
-            i = db.get(models.Invoice, target_id); old = i.status; i.status = "PAID"
+            i = db.get(models.Invoice, target_id); old = i.status; i.status = "PAID"; i.paid_on = tx.booked_on; i.paid_method = "BANK_TRANSFER"; from . import payments as _pay; _pay.complete_by_statement(db, i.id, user)
             audit.log(db, user, "invoice_paid_by_bank_match", "invoice", i.id, {"status": old}, {"status": "PAID", "tx": tx.id})
     else:
         tx.match_status = "SUGGESTED"

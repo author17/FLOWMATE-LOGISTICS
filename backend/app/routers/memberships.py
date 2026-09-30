@@ -8,6 +8,7 @@ from ..db import get_db
 from ..security import require
 from .. import models, audit
 from .crud import row
+from ..dates import on_day, since, before
 
 router = APIRouter(prefix="/api", tags=["memberships"])
 
@@ -26,10 +27,15 @@ def member_out(db, m):
     return {**row(m), "status": "ACTIVE" if act else ("NO_PLAN" if not subs else "EXPIRED"), "current_plan": act["plan_name"] if act else (subs[0]["plan_name"] if subs else ""),
             "valid_until": (act or (subs[0] if subs else {})).get("end_on"), "balance_cents": bal, "subscriptions": subs}
 
+from ..security import scope_location, SCOPED_ROLES
+def _deny_other_site(u, m):
+    if u.role in SCOPED_ROLES and u.location_id and m.location_id not in (None, u.location_id): raise HTTPException(403, "This member belongs to another location")
+
 class MemberIn(BaseModel): name: str; phone: str | None = None; email: str | None = None; location_id: int | None = None; notes: str | None = None
 
 @router.get("/members")
 def members(q: str | None = None, status: str | None = None, location_id: int | None = None, db: Session = Depends(get_db), u=Depends(require("memberships"))):
+    location_id = scope_location(u, location_id)
     qry = select(models.Member).where(models.Member.active == True).order_by(models.Member.name)
     if q: qry = qry.where(models.Member.name.ilike(f"%{q}%") | models.Member.phone.ilike(f"%{q}%"))
     if location_id: qry = qry.where(models.Member.location_id == location_id)
@@ -40,12 +46,14 @@ def members(q: str | None = None, status: str | None = None, location_id: int | 
 
 @router.post("/members", status_code=201)
 def add_member(d: MemberIn, db: Session = Depends(get_db), u=Depends(require("memberships"))):
+    d.location_id = scope_location(u, d.location_id) or d.location_id
     m = models.Member(**d.model_dump()); db.add(m); db.flush(); audit.log(db, u, "create", "member", m.id, None, d.model_dump()); db.commit(); return member_out(db, m)
 
 @router.put("/members/{id}")
 def edit_member(id: int, d: dict, db: Session = Depends(get_db), u=Depends(require("memberships"))):
     m = db.get(models.Member, id)
     if not m: raise HTTPException(404)
+    _deny_other_site(u, m)
     for k in ("name", "phone", "email", "notes", "location_id", "active"):
         if k in d: setattr(m, k, d[k])
     audit.log(db, u, "update", "member", id, None, d); db.commit(); return member_out(db, m)
@@ -56,6 +64,7 @@ class SellIn(BaseModel): plan_id: int; start_on: date | None = None; price_cents
 def sell(id: int, d: SellIn, db: Session = Depends(get_db), u=Depends(require("memberships"))):
     m, p = db.get(models.Member, id), db.get(models.Plan, d.plan_id)
     if not m or not p: raise HTTPException(404, "Member or plan not found")
+    _deny_other_site(u, m)
     if d.pay_cents < 0: raise HTTPException(422, "Payment cannot be negative")
     start = d.start_on or date.today()
     # renewing early extends from the current end date so the member loses no days
@@ -92,6 +101,7 @@ class CheckInIn(BaseModel): location_id: int | None = None
 def checkin(id: int, d: CheckInIn, db: Session = Depends(get_db), u=Depends(require("memberships"))):
     m = db.get(models.Member, id)
     if not m: raise HTTPException(404)
+    _deny_other_site(u, m)
     subs = [sub_out(db, s) for s in db.scalars(select(models.Subscription).where(models.Subscription.member_id == id))]
     act = [s for s in subs if s["state"] == "ACTIVE"]
     if not act: raise HTTPException(409, "No active membership - renew before entry")
@@ -105,11 +115,12 @@ def checkin(id: int, d: CheckInIn, db: Session = Depends(get_db), u=Depends(requ
 
 @router.get("/memberships/summary")
 def summary(location_id: int | None = None, db: Session = Depends(get_db), u=Depends(require("memberships"))):
+    location_id = scope_location(u, location_id)
     ms = [member_out(db, m) for m in db.scalars(select(models.Member).where(models.Member.active == True))]
     if location_id: ms = [m for m in ms if m["location_id"] == location_id]
     soon = [m for m in ms if m["status"] == "ACTIVE" and m["valid_until"] and (m["valid_until"] if isinstance(m["valid_until"], date) else date.fromisoformat(str(m["valid_until"]))) <= date.today() + timedelta(days=7)]
     m0 = date.today().replace(day=1)
     rev = db.scalar(select(func.coalesce(func.sum(models.SubPayment.amount_cents), 0)).where(models.SubPayment.paid_on >= m0)) or 0
-    today_in = db.scalar(select(func.count()).select_from(models.CheckIn).where(func.date(models.CheckIn.at) == date.today().isoformat())) or 0
+    today_in = db.scalar(select(func.count()).select_from(models.CheckIn).where(on_day(models.CheckIn.at, date.today()))) or 0
     return {"active": sum(m["status"] == "ACTIVE" for m in ms), "expired": sum(m["status"] == "EXPIRED" for m in ms), "expiring_7d": [{"id": m["id"], "name": m["name"], "valid_until": str(m["valid_until"]), "plan": m["current_plan"]} for m in soon],
             "owing": [{"id": m["id"], "name": m["name"], "balance_cents": m["balance_cents"]} for m in ms if m["balance_cents"] > 0], "revenue_month_cents": rev, "checkins_today": today_in}

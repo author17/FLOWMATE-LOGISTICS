@@ -30,6 +30,10 @@ def r_sales(db, a, b, loc, period="day"):
     for p in db.scalars(select(models.SubPayment).where(models.SubPayment.paid_on >= a, models.SubPayment.paid_on <= b)):
         if loc and p.location_id != loc: continue
         k = (key(p.paid_on), names.get(p.location_id, "") + " (memberships)"); agg[k] = agg.get(k, 0) + p.amount_cents
+    for rf in db.scalars(select(models.Refund).where(models.Refund.created_at >= a, models.Refund.created_at < b + timedelta(days=1))):
+        o = db.get(models.Order, rf.order_id)
+        if loc and o.location_id != loc: continue
+        k = (key(rf.created_at.date()), names.get(o.location_id, "") + " (refunds)"); agg[k] = agg.get(k, 0) - rf.amount_cents
     rows = [[k[0], k[1], eur(v)] for k, v in sorted(agg.items())]
     return f"Sales by {period}", ["Period", "Location", "Sales EUR"], rows + [["TOTAL", "", round(sum(r[2] for r in rows), 2)]]
 
@@ -101,9 +105,11 @@ def r_products(db, a, b, loc):
 
 def r_pnl(db, a, b, loc):
     sales = sum(o.total_cents for o in _orders(db, a, b, loc)) + sum(p.amount_cents for p in db.scalars(select(models.SubPayment).where(models.SubPayment.paid_on >= a, models.SubPayment.paid_on <= b)) if not loc or p.location_id == loc)
+    refunds = sum(r.amount_cents for r in db.scalars(select(models.Refund).where(models.Refund.created_at >= a, models.Refund.created_at < b + timedelta(days=1))))
+    sales -= refunds
     exp = sum(e.amount_cents for e in db.scalars(select(models.Expense).where(models.Expense.spent_on >= a, models.Expense.spent_on <= b)) if not loc or e.location_id == loc)
     inv = sum(i.total_cents for i in db.scalars(select(models.Invoice).where(models.Invoice.issue_date >= a, models.Invoice.issue_date <= b)) if not loc or i.location_id == loc)
-    rows = [["Revenue (orders + memberships paid)", eur(sales)], ["Expenses", eur(exp)], ["Supplier invoices received", eur(inv)], ["Profit / loss ESTIMATE", eur(sales - exp - inv)],
+    rows = [["Revenue (orders + memberships, after refunds)", eur(sales)], ["Expenses", eur(exp)], ["Supplier invoices received", eur(inv)], ["Profit / loss ESTIMATE", eur(sales - exp - inv)],
             ["NOTE: management estimate, not accounts. Cash-basis for memberships, invoice-date basis for purchases.", ""]]
     return "Profit / loss estimate", ["Item", "EUR"], rows
 
@@ -114,7 +120,11 @@ def r_shifts(db, a, b, loc):
         rows.append([str(s.opened_at)[:16], names.get(s.location_id, ""), eur(s.cash_sales_cents), eur(s.card_sales_cents), eur(s.difference_cents)])
     return "Cashier cash-up differences", ["Opened", "Location", "Cash sales EUR", "Card sales EUR", "Difference EUR"], rows
 
-REPORTS = {"sales": r_sales, "expenses": r_expenses, "suppliers": r_suppliers, "outstanding": r_outstanding, "customers": r_customers, "bank": r_bank, "cashflow": r_cashflow,
+def r_ledger(db, a, b, loc):
+    from .finance import ledger
+    return "Accounting records (journal)", ["Date", "Type", "Description", "Location", "Amount EUR", "VAT EUR", "Reference"], ledger(db, a, b, loc)
+
+REPORTS = {"ledger": r_ledger, "sales": r_sales, "expenses": r_expenses, "suppliers": r_suppliers, "outstanding": r_outstanding, "customers": r_customers, "bank": r_bank, "cashflow": r_cashflow,
            "vat": r_vat, "stock": r_stockvalue, "products": r_products, "pnl": r_pnl, "shifts": r_shifts}
 
 def _xlsx(title, cols, rows):

@@ -62,7 +62,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         if obj.get("amount_total") != op.amount_cents or obj.get("currency") != "eur":
             op.status = "AMOUNT_MISMATCH"; audit.notify(db, "stripe_mismatch", f"Stripe payment {op.session_id} amount does not match - check manually")
         else:
-            op.status, op.paid_at = "PAID", datetime.utcnow()
+            op.status, op.paid_at, op.payment_intent = "PAID", datetime.utcnow(), obj.get("payment_intent")
             if op.target_type == "order":
                 o = db.get(models.Order, op.target_id); old = o.status; o.status = "PAID"; o.payment_method = "ONLINE"
                 audit.log(db, None, "order_paid_online", "order", o.id, {"status": old}, {"status": "PAID", "stripe": op.session_id}); audit.notify(db, "payment", f"Order #{o.id} paid online")

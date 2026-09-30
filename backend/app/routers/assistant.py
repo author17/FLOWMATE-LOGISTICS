@@ -10,6 +10,7 @@ from ..config import ANTHROPIC_API_KEY
 from ..db import get_db
 from ..security import current_user, PERMS
 from .. import models
+from ..dates import on_day, since, before
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 eur = lambda c: f"{(c or 0) / 100:,.2f} EUR"
@@ -38,7 +39,7 @@ def t_unpaid_invoices(db, a):
 def t_sales(db, a):
     days = {"today": 0, "yesterday": 1, "week": 7, "month": 30}.get(a.get("period", "week"), 7); end = date.today(); start = end - timedelta(days=days)
     if a.get("period") == "yesterday": end = start
-    o = sum(x.total_cents for x in db.scalars(select(models.Order).where(models.Order.status != "CANCELLED", func.date(models.Order.created_at) >= start.isoformat(), func.date(models.Order.created_at) <= end.isoformat())))
+    o = sum(x.total_cents for x in db.scalars(select(models.Order).where(models.Order.status != "CANCELLED", since(models.Order.created_at, start), before(models.Order.created_at, end + timedelta(days=1)))))
     m = db.scalar(select(func.coalesce(func.sum(models.SubPayment.amount_cents), 0)).where(models.SubPayment.paid_on >= start, models.SubPayment.paid_on <= end)) or 0
     return {"from": str(start), "to": str(end), "orders": eur(o), "memberships": eur(m), "total": eur(o + m)}
 
@@ -56,6 +57,25 @@ def t_members(db, a):
     from .memberships import summary
     return {"active_members": db.scalar(select(func.count()).select_from(models.Member)) or 0, "note": "see Members screen for expiring and unpaid lists"}
 
+def t_attention(db, a):
+    from types import SimpleNamespace
+    from .cockpit import cockpit
+    d = cockpit(None, db, SimpleNamespace(role="owner", location_id=None))
+    return {"needs_attention": [x["text"] for x in d["attention"]]}
+
+def t_to_order(db, a):
+    from types import SimpleNamespace
+    from .cockpit import cockpit
+    d = cockpit(None, db, SimpleNamespace(role="owner", location_id=None))
+    return {"to_order": [{"product": l["name"], "have": l["quantity"], "minimum": l["min_stock"], "suggested": l["suggested"], "supplier": l["supplier"], "last_price": eur(l["last_price_cents"])} for l in d["low_stock"]]}
+
+def t_supplier_paid(db, a):
+    n = (a.get("supplier") or "").lower(); out = []
+    for i in db.scalars(select(models.Invoice).order_by(models.Invoice.id.desc())):
+        s = db.get(models.Supplier, i.supplier_id)
+        if n and s and n in s.name.lower(): out.append({"supplier": s.name, "invoice": i.number, "amount": eur(i.total_cents), "status": i.status, "paid_on": str(i.paid_on) if i.paid_on else None})
+    return {"invoices": out[:10]}
+
 TOOLS = {  # name: (function, required permission area, description, keywords)
     "spend_by_category": (t_spend_category, "reports", "Spending this month, optionally for one category like food", ["spend", "spent", "expense", "cost"]),
     "supplier_balances": (t_supplier_owed, "invoices", "How much is owed to each supplier", ["supplier", "owe", "outstanding"]),
@@ -63,6 +83,9 @@ TOOLS = {  # name: (function, required permission area, description, keywords)
     "unpaid_invoices": (t_unpaid_invoices, "invoices", "Unpaid supplier invoices", ["unpaid invoice", "invoices", "overdue"]),
     "sales": (t_sales, "reports", "Sales for today, yesterday, week or month (arg period)", ["sales", "sold", "revenue", "takings"]),
     "unpaid_customers": (t_unpaid_customers, "orders", "Customers with unpaid orders", ["customers", "haven't paid", "not paid", "owe us"]),
+    "attention": (t_attention, "reports", "Everything that needs the owner's attention right now", ["attention", "what needs", "what should i do", "urgent"]),
+    "to_order": (t_to_order, "stock_read", "What to order: low-stock products with suggested quantities and suppliers", ["need to order", "what to order", "should i order", "reorder"]),
+    "supplier_paid": (t_supplier_paid, "invoices", "Whether invoices of a supplier were paid (arg supplier)", ["get paid", "been paid", "was paid", "did we pay"]),
     "bank_today": (t_bank_today, "banking_read", "Today's bank transactions", ["bank", "transactions"]),
 }
 
@@ -73,7 +96,9 @@ def pick_by_keywords(q):
     m = re.search(r"on (\w+)", ql)
     if m and "spend" in ql or "spent" in ql:
         m2 = re.search(r"(?:on|for) ([a-z ]+?)(?: this| last|\?|$)", ql); args["category"] = (m2.group(1).strip() if m2 else "")
-    order = ["unpaid_customers", "unpaid_invoices", "low_stock", "supplier_balances", "bank_today", "spend_by_category", "sales"]
+    m3 = re.search(r"did (.+?) get paid|did we pay (.+?)\??$|was (.+?) paid", ql)
+    if m3: args["supplier"] = next(g for g in m3.groups() if g).strip(" ?")
+    order = ["attention", "to_order", "supplier_paid", "unpaid_customers", "unpaid_invoices", "low_stock", "supplier_balances", "bank_today", "spend_by_category", "sales"]
     for name in order:
         if any(k in ql for k in TOOLS[name][3]): return name, args
     return None, args
@@ -99,10 +124,13 @@ def _plain(name, d):
     if name == "unpaid_invoices": return f"{len(d['unpaid_invoices'])} unpaid invoice(s): " + "; ".join(f"{x['supplier']} {x['number']} {x['amount']} due {x['due']}" + (" OVERDUE" if x["overdue"] else "") for x in d["unpaid_invoices"])
     if name == "unpaid_customers": return "Unpaid orders: " + ("; ".join(f"{x['customer']} {x['unpaid']}" for x in d["customers_with_unpaid_orders"]) or "none.")
     if name == "bank_today": return "Today's bank transactions: " + ("; ".join(f"{x['amount']} {x['reference']} ({x['status']})" for x in d["today"]) or "none yet.")
+    if name == "attention": return "Needs attention: " + ("; ".join(d["needs_attention"]) or "nothing - all clear.")
+    if name == "to_order": return "To order: " + ("; ".join(f"{x['product']} - order {x['suggested']} (have {x['have']}, min {x['minimum']}) from {x['supplier'] or 'no supplier set'} at {x['last_price']}" for x in d["to_order"]) or "nothing is below minimum.")
+    if name == "supplier_paid": return "; ".join(f"{x['supplier']} {x['invoice']} {x['amount']}: {x['status']}" + (f" on {x['paid_on']}" if x["paid_on"] else "") for x in d["invoices"]) or "No matching invoices found."
     return json.dumps(d)
 
 def _llm(question, avail, db, u):
-    tools = [{"name": n, "description": t[2], "input_schema": {"type": "object", "properties": {"period": {"type": "string"}, "category": {"type": "string"}}}} for n, t in avail.items()]
+    tools = [{"name": n, "description": t[2], "input_schema": {"type": "object", "properties": {"period": {"type": "string"}, "category": {"type": "string"}, "supplier": {"type": "string"}}}} for n, t in avail.items()]
     H = {"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01"}; msgs = [{"role": "user", "content": question}]
     sys = "You are the FLOWMATE business assistant for a small business. Use tools to get facts; never invent numbers. Answer briefly. If no tool fits, say what you can answer."
     last = None

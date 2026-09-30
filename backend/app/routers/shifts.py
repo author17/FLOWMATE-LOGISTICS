@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..security import require
+from ..security import require, scope_location
 from .. import models, audit
 from .crud import row
 
@@ -19,6 +19,7 @@ class CloseIn(BaseModel):
 def open_shift(d: OpenIn, db: Session = Depends(get_db), u=Depends(require("shifts"))):
     if db.scalar(select(models.Shift).where(models.Shift.cashier_id == u.id, models.Shift.status == "OPEN")):
         raise HTTPException(409, "You already have an open shift")
+    d.location_id = scope_location(u, d.location_id) or d.location_id
     s = models.Shift(location_id=d.location_id, cashier_id=u.id, opening_float_cents=d.opening_float_cents)
     db.add(s); db.flush(); audit.log(db, u, "open_shift", "shift", s.id); db.commit(); return row(s)
 
@@ -39,6 +40,7 @@ def close_shift(id: int, d: CloseIn, db: Session = Depends(get_db), u=Depends(re
 @router.get("")
 def list_shifts(location_id: int | None = None, db: Session = Depends(get_db), u=Depends(require("shifts"))):
     q = select(models.Shift).order_by(models.Shift.id.desc())
+    location_id = scope_location(u, location_id)
     if location_id: q = q.where(models.Shift.location_id == location_id)
     if u.role == "employee": q = q.where(models.Shift.cashier_id == u.id)
     return [row(s) for s in db.scalars(q)]

@@ -15,15 +15,16 @@ NEXT = {"PREPARED": {"ON_THE_WAY", "CANCELLED"}, "ON_THE_WAY": {"DELIVERED", "FA
 def out(d, db):
     o = db.get(models.Order, d.order_id); drv = db.get(models.User, d.driver_id) if d.driver_id else None
     c = db.get(models.Customer, o.customer_id) if o and o.customer_id else None
-    return {**row(d), "order_total_cents": o.total_cents if o else 0, "customer": c.name if c else "", "driver_name": drv.name if drv else ""}
+    return {**row(d), "order_total_cents": o.total_cents if o else 0, "customer": c.name if c else "", "driver_name": drv.name if drv else "", "driver_phone": drv.phone if drv else None, "customer_phone": c.phone if c else None}
 
-class NewDelivery(BaseModel): order_id: int; address: str = ""; driver_id: int | None = None; scheduled_for: date | None = None
+class NewDelivery(BaseModel): order_id: int; address: str = ""; driver_id: int | None = None; scheduled_for: date | None = None; eta: str | None = None
+class EtaIn(BaseModel): eta: str | None = None
 class StatusIn(BaseModel): status: str; reason: str | None = None; proof_document_id: int | None = None
 class AssignIn(BaseModel): driver_id: int
 
 @router.get("/drivers")
 def drivers(db: Session = Depends(get_db), u=Depends(require("delivery"))):
-    return [{"id": x.id, "name": x.name} for x in db.scalars(select(models.User).where(models.User.role == "driver", models.User.active == True))]
+    return [{"id": x.id, "name": x.name, "phone": x.phone} for x in db.scalars(select(models.User).where(models.User.role == "driver", models.User.active == True))]
 
 @router.get("")
 def list_(status: str | None = None, db: Session = Depends(get_db), u=Depends(require("delivery"))):
@@ -50,6 +51,15 @@ def assign(id: int, d: AssignIn, db: Session = Depends(get_db), u=Depends(requir
     if not x or not drv or drv.role != "driver": raise HTTPException(404, "Delivery or driver not found")
     old = x.driver_id; x.driver_id = d.driver_id
     audit.log(db, u, "assign_driver", "delivery", id, {"driver_id": old}, {"driver_id": d.driver_id}); db.commit(); return out(x, db)
+
+@router.put("/{id}/eta")
+def set_eta(id: int, d: EtaIn, db: Session = Depends(get_db), u=Depends(require("delivery"))):
+    import re
+    x = db.get(models.Delivery, id)
+    if not x: raise HTTPException(404)
+    if u.role == "driver" and x.driver_id != u.id: raise HTTPException(403, "Not your delivery")
+    if d.eta and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", d.eta): raise HTTPException(422, "ETA must be a time like 14:30")
+    x.eta = d.eta or None; audit.log(db, u, "delivery_eta", "delivery", id, None, {"eta": d.eta}); db.commit(); return out(x, db)
 
 @router.put("/{id}/status")
 def status(id: int, d: StatusIn, db: Session = Depends(get_db), u=Depends(require("delivery"))):
