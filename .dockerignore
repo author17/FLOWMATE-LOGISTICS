@@ -1,0 +1,1 @@
+**/node_modules\n**/__pycache__\n*.db\n.git\nstorage/*\n.env\n

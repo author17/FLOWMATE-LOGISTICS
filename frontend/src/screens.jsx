@@ -56,16 +56,16 @@ export function Invoices({ locs }) {
 }
 
 export function Scan({ loc, locs }) {
-  const [docs, load, err] = useData("/documents"), [sups] = useData("/suppliers"), [busy, setBusy] = useState(false), [e2, setE2] = useState(""), [sel, setSel] = useState(null);
+  const [docs, load, err] = useData("/documents"), [sups] = useData("/suppliers"), [dtype, setDtype] = useState("receipt"), [busy, setBusy] = useState(false), [e2, setE2] = useState(""), [sel, setSel] = useState(null);
   async function up(ev) {
     const file = ev.target.files[0]; if (!file) return; setBusy(true); setE2("");
-    const fd = new FormData(); fd.append("file", file); fd.append("doc_type", "receipt"); if (loc) fd.append("location_id", loc);
-    try { const d = await api("/documents/scan", { method: "POST", body: fd }); setSel(d); load(); } catch (x) { setE2(x.message); } setBusy(false);
+    const fd = new FormData(); fd.append("file", file); fd.append("doc_type", dtype); if (loc) fd.append("location_id", loc);
+    try { const d = await api("/documents/scan", { method: "POST", body: fd }); if (["receipt", "invoice"].includes(dtype)) setSel(d); load(); ev.target.value = ""; } catch (x) { setE2(x.message); } setBusy(false);
   }
-  return <><h1>Scan receipt / invoice</h1><Err e={err || e2} />
-    <div className="row"><input type="file" accept="image/*,application/pdf" capture="environment" onChange={up} />{busy && <span className="mute">Reading…</span>}</div>
+  return <><h1>Scan receipts & documents</h1><Err e={err || e2} />
+    <div className="row"><select value={dtype} onChange={e => setDtype(e.target.value)}><option value="receipt">Receipt</option><option value="invoice">Supplier invoice</option><option value="statement">Bank statement</option><option value="contract">Contract</option><option value="other">Other document</option></select><input type="file" accept="image/*,application/pdf" capture="environment" onChange={up} />{busy && <span className="mute">Reading…</span>}</div>
     {sel && <Review doc={sel} sups={sups || []} locs={locs} onDone={() => { setSel(null); load(); }} />}
-    {docs && <Table cols={[["#", r => r.id], ["File", r => <a href={`/api/documents/${r.id}/file`} target="_blank" rel="noreferrer" onClick={e => { e.preventDefault(); openFile(r); }}>{r.filename}</a>], ["Status", r => <Tag s={r.status} />], ["", r => r.status === "NEEDS_REVIEW" && <button className="s" onClick={() => setSel(r)}>Review</button>]]} rows={docs} />}</>;
+    {docs && <Table cols={[["#", r => r.id], ["Type", r => r.doc_type], ["File", r => <a href={`/api/documents/${r.id}/file`} target="_blank" rel="noreferrer" onClick={e => { e.preventDefault(); openFile(r); }}>{r.filename}</a>], ["Status", r => <Tag s={r.status} />], ["", r => r.status === "NEEDS_REVIEW" && <button className="s" onClick={() => setSel(r)}>Review</button>]]} rows={docs} />}</>;
 }
 async function openFile(d) { const t = localStorage.getItem("token"); const r = await fetch(`/api/documents/${d.id}/file`, { headers: { Authorization: "Bearer " + t } }); window.open(URL.createObjectURL(await r.blob())); }
 

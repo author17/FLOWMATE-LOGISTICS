@@ -40,3 +40,6 @@ low-stock purchase orders, dashboard per location, audit log, notifications, CSV
 ## Before real use (not done yet)
 Set SECRET_KEY; HTTPS; switch to PostgreSQL; MFA; real Open Banking provider class; encrypted backups; password change/reset;
 mobile app (the web app already opens the camera on phones); Cyprus VAT/cash-register rules checked with an accountant; no claim of replacing accounting software.
+
+## Publishing
+See docs/DEPLOY.md (Dockerfile, docker-compose.yml, render.yaml included). Practice copy = DEMO_MODE=1 with fake data; real copy = ENV=production + create_owner.py.

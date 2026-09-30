@@ -1,4 +1,4 @@
-"""Creates demo data: 4 locations (2 gyms + 2 cafes), users for each role, suppliers, products, an order and an invoice.
+"""DEMO ONLY - never run on a real server (public passwords). Creates demo data: 4 locations (2 gyms + 2 cafes), users for each role, suppliers, products, an order and an invoice.
 Run:  python seed.py      (login: owner@demo.com / demo12345)"""
 from datetime import date, timedelta
 from app.db import engine, Base, SessionLocal
@@ -6,6 +6,8 @@ from app import models
 from app.security import hash_password
 
 def seed(db):
+    import os
+    if os.getenv("ENV") == "production" and os.getenv("DEMO_MODE") != "1": raise SystemExit("seed.py is demo-only. Use create_owner.py in production.")
     if db.query(models.User).first(): return print("Already seeded")
     locs = [models.Location(name=n, kind=k) for n, k in [("Gym A", "gym"), ("Gym A Cafe", "cafe"), ("Gym B", "gym"), ("Gym B Cafe", "cafe")]]
     db.add_all(locs); db.flush()

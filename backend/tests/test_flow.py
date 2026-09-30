@@ -85,3 +85,12 @@ def test_delivery_flow():
     assert r["status"] == "DELIVERED" and r["delivered_at"]
     assert [x for x in c.get("/api/orders", headers=owner).json() if x["id"] == o["id"]][0]["status"] == "COMPLETED"
     assert c.get("/api/dashboard", headers=owner).json()["deliveries_active"] == 0
+
+def test_password_change_and_lockout():
+    h = login("manager@demo.com")
+    assert c.post("/api/auth/change-password", headers=h, json={"old_password": "wrong", "new_password": "longenough123"}).status_code == 401
+    assert c.post("/api/auth/change-password", headers=h, json={"old_password": "demo12345", "new_password": "short"}).status_code == 422
+    assert c.post("/api/auth/change-password", headers=h, json={"old_password": "demo12345", "new_password": "a-better-pass-99"}).status_code == 200
+    assert c.post("/api/auth/login", data={"username": "manager@demo.com", "password": "demo12345"}).status_code == 401
+    for _ in range(5): c.post("/api/auth/login", data={"username": "accountant@demo.com", "password": "bad"})
+    assert c.post("/api/auth/login", data={"username": "accountant@demo.com", "password": "demo12345"}).status_code == 429

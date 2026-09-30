@@ -21,6 +21,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), default="employee")  # owner|manager|employee|accountant|bank_payment|admin
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class Customer(Base):
     __tablename__ = "customers"
