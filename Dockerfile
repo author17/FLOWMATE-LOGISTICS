@@ -17,4 +17,5 @@ RUN mkdir -p /data/files
 ENV STORAGE_DIR=/data/files
 WORKDIR /app/backend
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# AUTO_SEED=1 (practice copy only) re-creates the demo data when the container starts
+CMD ["sh", "-c", "if [ \"$AUTO_SEED\" = \"1\" ]; then python seed.py; fi; uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
