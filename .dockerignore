@@ -1,1 +1,8 @@
-**/node_modules\n**/__pycache__\n*.db\n.git\nstorage/*\n.env\n
+**/node_modules
+**/__pycache__
+*.db
+.git
+storage/*
+.env
+frontend/dist
+frontend/public/ocr

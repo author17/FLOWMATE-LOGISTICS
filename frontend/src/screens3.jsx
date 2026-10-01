@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, eur, cents, download } from "./api.js";
 import { useData, Err, Tag, Table, Card } from "./ui.jsx";
 import { BankToast } from "./bank.jsx";
+import { ocrFile, parseText } from "./ocr.js";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const useRun = (load) => { const [e, setE] = useState(""); return [e, (fn) => async (...a) => { try { await fn(...a); setE(""); load && load(); } catch (x) { setE(x.message); } }]; };
@@ -220,14 +221,36 @@ const DTYPES = [["receipt", "Receipt"], ["invoice", "Supplier invoice"], ["deliv
 export function Scan({ loc, locs }) {
   const [q, setQ] = useState(""), [ft, setFt] = useState(""), [st, setSt] = useState(""), qs = new URLSearchParams({ ...(q && { q }), ...(ft && { doc_type: ft }), ...(st && { status: st }) }).toString();
   const [docs, load, err] = useData("/documents" + (qs ? "?" + qs : "")), [sups] = useData("/suppliers"), [dtype, setDtype] = useState("receipt"), [busy, setBusy] = useState(false), [e2, setE2] = useState(""), [sel, setSel] = useState(null), [meta, setMeta] = useState(null);
-  async function up(ev) {
-    const file = ev.target.files[0]; if (!file) return; setBusy(true); setE2("");
-    const fd = new FormData(); fd.append("file", file); fd.append("doc_type", dtype); if (loc) fd.append("location_id", loc);
-    try { const d = await api("/documents/scan", { method: "POST", body: fd }); if (["receipt", "invoice"].includes(dtype)) setSel(d); load(); ev.target.value = ""; } catch (x) { setE2(x.message); } setBusy(false);
+  const [prog, setProg] = useState(""), [drag, setDrag] = useState(false);
+  async function handle(files) {
+    files = [...files]; if (!files.length) return; setBusy(true); setE2(""); let last = null;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i], tag = files.length > 1 ? `File ${i + 1}/${files.length}: ` : "";
+      try {
+        setProg(tag + "uploading…");
+        const fd = new FormData(); fd.append("file", file); fd.append("doc_type", dtype); if (loc) fd.append("location_id", loc);
+        let d = await api("/documents/scan", { method: "POST", body: fd });
+        const ex = d.extracted || {};
+        if (["receipt", "invoice", "delivery_note", "purchase_order", "tax_document"].includes(dtype) && !ex.total && !ex.supplier) {   // server has no reader: read it here, free, in the browser
+          setProg(tag + "reading the text (first time takes ~20 s)…");
+          const { text, confidence } = await ocrFile(file, p => setProg(tag + `reading… ${p}%`));
+          const r = parseText(text, sups || []);
+          const extracted = { ...r, confidence, raw_text: text.slice(0, 4000) };
+          const sup = (sups || []).find(s => s.name === r.supplier);
+          d = await api(`/documents/${d.id}`, { method: "PUT", body: { company: r.supplier || null, reference: r.number || null, amount_cents: r.total ? cents(r.total) : null, doc_date: r.date || null } });
+          d = { ...d, extracted, supplier_id: sup?.id };
+        }
+        last = d;
+      } catch (x) { setE2(`${file.name}: ${x.message}`); }
+    }
+    setBusy(false); setProg(""); load();
+    if (last && files.length === 1 && ["receipt", "invoice"].includes(dtype)) setSel(last);
   }
+  const up = ev => { handle(ev.target.files); ev.target.value = ""; };
   const saveMeta = async () => { try { await api(`/documents/${meta.id}`, { method: "PUT", body: { doc_type: meta.doc_type, company: meta.company || null, reference: meta.reference || null, amount_cents: meta.amount ? cents(meta.amount) : null, doc_date: meta.doc_date || null, related_order_id: meta.related_order_id ? +meta.related_order_id : null, related_invoice_id: meta.related_invoice_id ? +meta.related_invoice_id : null, status: meta.status } }); setMeta(null); load(); } catch (x) { setE2(x.message); } };
   return <><h1>Documents</h1><Err e={err || e2} />
-    <div className="row"><select value={dtype} onChange={e => setDtype(e.target.value)}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select><input type="file" accept="image/*,application/pdf" capture="environment" onChange={up} />{busy && <span className="mute">Reading…</span>}</div>
+    <div className="row"><select value={dtype} onChange={e => setDtype(e.target.value)}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select><input type="file" multiple accept="image/*,application/pdf" onChange={up} />{busy && <span className="mute">{prog || "Working…"}</span>}</div>
+    <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files); }} className="card" style={{ marginBottom: 10, textAlign: "center", borderStyle: "dashed", borderColor: drag ? "var(--accent)" : undefined }}>Drag scanned files here (several at once) — or on a phone use the button above to take a photo.</div>
     {sel && <Review doc={sel} sups={sups || []} onDone={() => { setSel(null); load(); }} />}
     {meta && <div className="card" style={{ marginBottom: 12 }}><b>Document details</b><div className="row" style={{ marginTop: 6 }}><select value={meta.doc_type} onChange={e => setMeta({ ...meta, doc_type: e.target.value })}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
       <input placeholder="Company" value={meta.company || ""} onChange={e => setMeta({ ...meta, company: e.target.value })} /><input placeholder="Reference / number" value={meta.reference || ""} onChange={e => setMeta({ ...meta, reference: e.target.value })} /><input placeholder="Amount €" style={{ width: 90 }} value={meta.amount || ""} onChange={e => setMeta({ ...meta, amount: e.target.value })} />

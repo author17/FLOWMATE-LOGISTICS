@@ -1,4 +1,24 @@
-{ "name": "bizops-web", "private": true, "version": "0.1.0", "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build" },
-  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" },
-  "devDependencies": { "@vitejs/plugin-react": "^4.3.1", "vite": "^5.4.0" } }
+{
+ "name": "bizops-web",
+ "private": true,
+ "version": "0.1.0",
+ "type": "module",
+ "scripts": {
+  "dev": "vite",
+  "build": "vite build",
+  "prebuild": "node scripts/copy-ocr-assets.mjs",
+  "predev": "node scripts/copy-ocr-assets.mjs"
+ },
+ "dependencies": {
+  "@tesseract.js-data/ell": "^1.0.0",
+  "@tesseract.js-data/eng": "^1.0.0",
+  "pdfjs-dist": "^6.3.289",
+  "react": "^18.3.1",
+  "react-dom": "^18.3.1",
+  "tesseract.js": "^7.0.0"
+ },
+ "devDependencies": {
+  "@vitejs/plugin-react": "^4.3.1",
+  "vite": "^5.4.0"
+ }
+}
