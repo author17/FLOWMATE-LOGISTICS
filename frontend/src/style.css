@@ -39,5 +39,4 @@ a.btn{text-decoration:none;display:inline-block}
  .pop{position:fixed;left:8px;right:8px;top:calc(60px + env(safe-area-inset-top));width:auto}
  .srch .pop{left:8px;right:8px;width:auto;top:calc(60px + env(safe-area-inset-top))}
 }
-.camera-btn{display:none}
-@media(max-width:760px),(pointer:coarse){.camera-btn{display:inline-block;font-size:16px;padding:12px 18px}}
+.camera-btn{display:inline-block}
