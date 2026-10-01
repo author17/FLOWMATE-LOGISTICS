@@ -1,7 +1,9 @@
 // Free OCR that runs inside the browser (Tesseract.js, English + Greek). The document never leaves the computer.
-let workerPromise = null;
-async function getWorker(onProgress) {
-  if (!workerPromise) workerPromise = import("tesseract.js").then(T => T.createWorker(["eng", "ell"], 1, {
+let workerPromise = null, workerLangs = "";
+async function resetWorker() { const p = workerPromise; workerPromise = null; workerLangs = ""; try { if (p) (await p).terminate(); } catch { } }
+async function getWorker(onProgress, langs = ["eng", "ell"]) {
+  if (workerPromise && workerLangs !== langs.join("+")) await resetWorker();
+  if (!workerPromise) workerPromise = (workerLangs = langs.join("+"), import("tesseract.js")).then(T => T.createWorker(langs, 1, {
     workerPath: "/ocr/worker.min.js", corePath: "/ocr/core", langPath: "/ocr/lang", gzip: true,
     logger: m => window.__ocrProgress && window.__ocrProgress(m),
   }));
@@ -30,25 +32,33 @@ export async function prepareImage(file, { maxSide = 1700, quality = 0.88, enhan
   return { canvas: c, blob };
 }
 
-async function pdfToImages(file, maxPages = 3) {
+async function pdfToImages(file, maxPages = 3, k = 1) {
   const pdfjs = await import("pdfjs-dist/build/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "/ocr/pdf.worker.min.mjs";
   const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise, out = [];
   for (let i = 1; i <= Math.min(pdf.numPages, maxPages); i++) {
-    const page = await pdf.getPage(i), vp = page.getViewport({ scale: 1.6 }), c = document.createElement("canvas");
+    const page = await pdf.getPage(i), vp = page.getViewport({ scale: 1.6 * k }), c = document.createElement("canvas");
     c.width = vp.width; c.height = vp.height; await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise; out.push(c);
   }
   return out;
 }
 
+// Tries the full reader first; if the phone runs out of memory it retries with a lighter one (English only, smaller picture).
+const ATTEMPTS = [{ langs: ["eng", "ell"], side: 1700 }, { langs: ["eng", "ell"], side: 1200 }, { langs: ["eng"], side: 1000 }];
 export async function ocrFile(file, onProgress) {
-  const w = await getWorker(onProgress);
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-  const inputs = isPdf ? await pdfToImages(file) : [(await prepareImage(file)).canvas];
-  let text = "", conf = 0;
-  try { for (const inp of inputs) { const { data } = await w.recognize(inp); text += data.text + "\n"; conf += data.confidence; inp.width = inp.height = 0; } }
-  catch (e) { workerPromise = null; try { await w.terminate(); } catch { } throw e; }   // start from a clean engine next time
-  return { text, confidence: Math.round(conf / inputs.length) };
+  let lastErr;
+  for (let i = 0; i < ATTEMPTS.length; i++) {
+    const { langs, side } = ATTEMPTS[i];
+    try {
+      const w = await getWorker(onProgress, langs);
+      const inputs = isPdf ? await pdfToImages(file, 3, side / 1700) : [(await prepareImage(file, { maxSide: side })).canvas];
+      let text = "", conf = 0;
+      for (const inp of inputs) { const { data } = await w.recognize(inp); text += data.text + "\n"; conf += data.confidence; inp.width = inp.height = 0; }
+      return { text, confidence: Math.round(conf / inputs.length), light: i > 0 };
+    } catch (e) { lastErr = e; await resetWorker(); if (onProgress) onProgress(0, "retrying with a lighter reader…"); }
+  }
+  throw lastErr || new Error("reader failed");
 }
 
 // ---------- turn raw text into fields (Cyprus/Greek/English receipts & invoices) ----------

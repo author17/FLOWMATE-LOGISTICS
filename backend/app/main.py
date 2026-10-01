@@ -11,7 +11,7 @@ from .migrate import migrate
 migrate()
 from .bootstrap import bootstrap
 bootstrap()
-app = FastAPI(title="FLOWMATE", version="0.9.2", docs_url=None if ENV == "production" else "/docs", redoc_url=None)
+app = FastAPI(title="FLOWMATE", version="0.9.3", docs_url=None if ENV == "production" else "/docs", redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 for r in [auth.router, *crud.routers, operations.router, documents.router, shifts.router, delivery.router, memberships.router, banking.router, reports.router, reports_ext.router, stripe_router.router, assistant.router, finance.router, openbanking.router, extras.router, extras.page_router, cockpit.router, search.router]:
     app.include_router(r)

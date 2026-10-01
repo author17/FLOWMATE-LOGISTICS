@@ -218,10 +218,35 @@ function PurchaseOrders({ prods, locs, onChange }) {
 
 /* ---------------- Documents: scan + library + review ---------------- */
 const DTYPES = [["receipt", "Receipt"], ["invoice", "Supplier invoice"], ["delivery_note", "Delivery note"], ["purchase_order", "Purchase order"], ["tax_document", "Tax document"], ["statement", "Bank statement"], ["contract", "Contract"], ["other", "Other"]];
+
+/* In-page camera: no switch to the phone's camera app (which can make low-memory phones close the browser tab). */
+function CameraCapture({ onShot, onClose }) {
+  const vid = React.useRef(null), [err, setErr] = useState(""), [n, setN] = useState(0), stream = React.useRef(null);
+  useEffect(() => {
+    let dead = false;
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 2048 }, height: { ideal: 1536 } }, audio: false })
+      .then(st => { if (dead) { st.getTracks().forEach(t => t.stop()); return; } stream.current = st; if (vid.current) { vid.current.srcObject = st; vid.current.play().catch(() => { }); } })
+      .catch(x => setErr(x.name === "NotAllowedError" ? "Camera permission was refused. Allow the camera for this site in the browser settings, or use the other button to pick a photo." : "Could not open the camera: " + (x.message || x.name)));
+    return () => { dead = true; stream.current?.getTracks().forEach(t => t.stop()); };
+  }, []);
+  async function shot() {
+    const v = vid.current; if (!v || !v.videoWidth) return;
+    const k = Math.min(1, 2000 / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement("canvas"); c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+    c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.9)); c.width = c.height = 0;
+    if (blob) { setN(n + 1); onShot(new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" })); }
+  }
+  return <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "#000", display: "flex", flexDirection: "column" }}>
+    {err ? <div style={{ color: "#fff", padding: 24 }}>{err}</div> : <video ref={vid} playsInline muted style={{ flex: 1, minHeight: 0, width: "100%", objectFit: "contain" }} />}
+    <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "center", padding: "12px 12px calc(16px + env(safe-area-inset-bottom))", background: "#000" }}>
+      <button className="s" onClick={onClose}>{n ? `Done (${n})` : "Cancel"}</button>
+      {!err && <button className="p" style={{ fontSize: 18, padding: "14px 28px" }} onClick={shot}>📸 Capture</button>}
+    </div></div>;
+}
 export function Scan({ loc, locs }) {
   const [q, setQ] = useState(""), [ft, setFt] = useState(""), [st, setSt] = useState(""), qs = new URLSearchParams({ ...(q && { q }), ...(ft && { doc_type: ft }), ...(st && { status: st }) }).toString();
   const [docs, load, err] = useData("/documents" + (qs ? "?" + qs : "")), [sups] = useData("/suppliers"), [dtype, setDtype] = useState("receipt"), [busy, setBusy] = useState(false), [e2, setE2] = useState(""), [sel, setSel] = useState(null), [meta, setMeta] = useState(null);
-  const [prog, setProg] = useState(""), [drag, setDrag] = useState(false);
+  const [prog, setProg] = useState(""), [drag, setDrag] = useState(false), [cam, setCam] = useState(false), canCam = !!navigator.mediaDevices?.getUserMedia;
   async function handle(files) {
     files = [...files]; if (!files.length) return; setBusy(true); setE2(""); let last = null;
     for (let i = 0; i < files.length; i++) {
@@ -236,8 +261,8 @@ export function Scan({ loc, locs }) {
         if (["receipt", "invoice", "delivery_note", "purchase_order", "tax_document"].includes(dtype) && !ex.total && !ex.supplier) {   // server has no reader: read it here, free, in the browser
           setProg(tag + "reading the text (first time takes ~20 s)…");
           let text = "", confidence = 0;
-          try { ({ text, confidence } = await ocrFile(up, p => setProg(tag + `reading… ${p}%`))); }
-          catch (x) { setE2(`${file.name}: saved, but the phone could not read it automatically (${x.message || "low memory"}). Open Details and type the fields, or try again with better light / closer photo.`); last = d; continue; }
+          try { ({ text, confidence } = await ocrFile(up, (p, msg) => setProg(tag + (msg || `reading… ${p}%`)))); }
+          catch (x) { setE2(`${file.name}: saved, but the phone could not read it automatically (${x.message || x.name || "unknown error"}). Open Details and type the fields, or try again with better light / closer photo.`); last = d; continue; }
           const r = parseText(text, sups || []);
           const extracted = { ...r, confidence, raw_text: text.slice(0, 4000) };
           const sup = (sups || []).find(s => s.name === r.supplier);
@@ -253,7 +278,8 @@ export function Scan({ loc, locs }) {
   const up = ev => { handle(ev.target.files); ev.target.value = ""; };
   const saveMeta = async () => { try { await api(`/documents/${meta.id}`, { method: "PUT", body: { doc_type: meta.doc_type, company: meta.company || null, reference: meta.reference || null, amount_cents: meta.amount ? cents(meta.amount) : null, doc_date: meta.doc_date || null, related_order_id: meta.related_order_id ? +meta.related_order_id : null, related_invoice_id: meta.related_invoice_id ? +meta.related_invoice_id : null, status: meta.status } }); setMeta(null); load(); } catch (x) { setE2(x.message); } };
   return <><h1>Documents</h1><Err e={err || e2} />
-    <div className="row"><select value={dtype} onChange={e => setDtype(e.target.value)}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select><label className="btn camera-btn">📷 Take photo (mobile / webcam)<input type="file" accept="image/*" capture="environment" hidden onChange={up} /></label><label className="btn">🖨 Add from scanner / computer<input type="file" multiple accept="image/*,application/pdf" hidden onChange={up} /></label>{busy && <span className="mute">{prog || "Working…"}</span>}</div>
+    {cam && <CameraCapture onShot={f => { setCam(false); handle([f]); }} onClose={() => setCam(false)} />}
+    <div className="row"><select value={dtype} onChange={e => setDtype(e.target.value)}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>{canCam ? <button className="p camera-btn" onClick={() => setCam(true)}>📷 Take photo (mobile / webcam)</button> : <label className="btn camera-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" hidden onChange={up} /></label>}<label className="btn">🖨 Add from scanner / computer<input type="file" multiple accept="image/*,application/pdf" hidden onChange={up} /></label>{busy && <span className="mute">{prog || "Working…"}</span>}</div>
     <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files); }} className="card" style={{ marginBottom: 10, textAlign: "center", borderStyle: "dashed", borderColor: drag ? "var(--accent)" : undefined }}><b>Using a scanner?</b> Scan to a PDF or image on this computer (most scanners do “Scan to PC / folder”), then click <b>Add from scanner / computer</b> and select the files — or drag them here. You can add many at once. On a phone, use <b>Take photo</b>.</div>
     {sel && <Review doc={sel} sups={sups || []} onDone={() => { setSel(null); load(); }} />}
     {meta && <div className="card" style={{ marginBottom: 12 }}><b>Document details</b><div className="row" style={{ marginTop: 6 }}><select value={meta.doc_type} onChange={e => setMeta({ ...meta, doc_type: e.target.value })}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
