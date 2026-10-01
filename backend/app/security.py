@@ -24,8 +24,13 @@ def make_token(user: models.User) -> str:
 
 MFA_EXEMPT = ("/api/auth/", "/api/config", "/api/settings")
 
-def mfa_required(user) -> bool:
-    return ENV == "production" and not DEMO_MODE and user.role in REQUIRE_MFA_ROLES and not user.totp_enabled
+def mfa_policy(db: Session) -> str:
+    """The owner chooses in Settings: 'optional' (default) or 'required' (for the roles in REQUIRE_MFA_ROLES)."""
+    row = db.get(models.Setting, "mfa_policy")
+    return row.value if row and row.value in ("optional", "required") else "optional"
+
+def mfa_required(user, db: Session) -> bool:
+    return ENV == "production" and not DEMO_MODE and user.role in REQUIRE_MFA_ROLES and not user.totp_enabled and mfa_policy(db) == "required"
 
 def current_user(request: Request, token: str = Depends(oauth2), db: Session = Depends(get_db)) -> models.User:
     try:
@@ -35,7 +40,7 @@ def current_user(request: Request, token: str = Depends(oauth2), db: Session = D
     user = db.get(models.User, uid)
     if not user or not user.active or data.get("tv", 0) != (user.token_version or 0):
         raise HTTPException(401, "Session ended - please log in again")
-    if mfa_required(user) and not request.url.path.startswith(MFA_EXEMPT):
+    if mfa_required(user, db) and not request.url.path.startswith(MFA_EXEMPT):
         raise HTTPException(403, "MFA_SETUP_REQUIRED")
     return user
 

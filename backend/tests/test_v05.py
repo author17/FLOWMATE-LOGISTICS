@@ -107,7 +107,7 @@ def test_inbound_email_needs_token(monkeypatch):
     assert any(d["source"] == "email" for d in c.get("/api/documents", headers=owner).json())
 
 def test_document_library_update_and_filters():
-    d = c.post("/api/documents/scan", headers=owner, files={"file": ("lib.jpg", b"x")}, data={"doc_type": "delivery_note"}).json()
+    d = c.post("/api/documents/scan", headers=owner, files={"file": ("lib.jpg", b"\xff\xd8\xffx")}, data={"doc_type": "delivery_note"}).json()
     assert d["doc_type"] == "delivery_note"
     u = c.put(f"/api/documents/{d['id']}", headers=owner, json={"company": "ACME", "amount_cents": 1234, "reference": "DN-9", "doc_date": "2026-09-01", "status": "VERIFIED"}).json()
     assert u["company"] == "ACME" and u["status"] == "VERIFIED"

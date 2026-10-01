@@ -4,7 +4,7 @@ export const eur = (c) => (c / 100).toLocaleString("en-IE", { style: "currency",
 export const cents = (s) => Math.round(parseFloat(String(s).replace(",", ".") || "0") * 100);
 
 export async function api(path, opts = {}) {
-  const headers = { ...(opts.headers || {}) };
+  const headers = { ...(opts.headers || {}), ...(window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone ? { "X-App-Mode": "standalone" } : {}) };
   if (token) headers.Authorization = "Bearer " + token;
   let body = opts.body;
   if (body && !(body instanceof FormData) && !(body instanceof URLSearchParams)) { body = JSON.stringify(body); headers["Content-Type"] = "application/json"; }

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, eur, cents, download } from "./api.js";
 import { useData, Err, Tag, Table, Card } from "./ui.jsx";
 import { BankToast } from "./bank.jsx";
-import { ocrFile, parseText, prepareImage } from "./ocr.js";
+import { ocrFile, parseText, prepareImage, isTiff, tiffToJpeg, resetOcr } from "./ocr.js";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const useRun = (load) => { const [e, setE] = useState(""); return [e, (fn) => async (...a) => { try { await fn(...a); setE(""); load && load(); } catch (x) { setE(x.message); } }]; };
@@ -248,15 +248,20 @@ export function Scan({ loc, locs }) {
   const [docs, load, err] = useData("/documents" + (qs ? "?" + qs : "")), [sups] = useData("/suppliers"), [dtype, setDtype] = useState("receipt"), [busy, setBusy] = useState(false), [e2, setE2] = useState(""), [sel, setSel] = useState(null), [meta, setMeta] = useState(null);
   const [prog, setProg] = useState(""), [drag, setDrag] = useState(false), [cam, setCam] = useState(false), canCam = !!navigator.mediaDevices?.getUserMedia;
   async function handle(files) {
-    files = [...files]; if (!files.length) return; setBusy(true); setE2(""); let last = null;
+    files = [...files]; if (!files.length) return; if (files.length > 50) { setE2(`${files.length} files selected - please add at most 50 at a time (the first 50 are being processed).`); files = files.slice(0, 50); }
+    setBusy(true); setE2(""); let last = null;
     for (let i = 0; i < files.length; i++) {
       const file = files[i], tag = files.length > 1 ? `File ${i + 1}/${files.length}: ` : "";
       try {
         setProg(tag + "uploading…");
-        let up = file;   // shrink big phone photos before uploading (faster, less memory, less storage)
-        if (/^image\//.test(file.type) && file.size > 1.5e6) { try { const { blob } = await prepareImage(file, { maxSide: 2400, quality: 0.85, enhance: false }); if (blob && blob.size < file.size) up = new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }); } catch { } }
+        if (i > 0 && i % 10 === 0) await resetOcr();   // long batches: start a fresh reader now and then so memory never builds up
+        let src = file;
+        if (isTiff(file)) { setProg(tag + "converting TIFF…"); src = await tiffToJpeg(file); }
+        let up = src;   // shrink big phone photos before uploading (faster, less memory, less storage)
+        if (/^image\//.test(src.type) && src.size > 1.5e6) { try { const { blob } = await prepareImage(src, { maxSide: 2400, quality: 0.85, enhance: false }); if (blob && blob.size < src.size) up = new File([blob], src.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }); } catch { } }
         const fd = new FormData(); fd.append("file", up); fd.append("doc_type", dtype); if (loc) fd.append("location_id", loc);
         let d = await api("/documents/scan", { method: "POST", body: fd });
+        if (d.duplicate_of) setE2(`${file.name}: the same file was already uploaded (document #${d.duplicate_of}). It was added again - delete one if it is a mistake.`);
         const ex = d.extracted || {};
         if (["receipt", "invoice", "delivery_note", "purchase_order", "tax_document"].includes(dtype) && !ex.total && !ex.supplier) {   // server has no reader: read it here, free, in the browser
           setProg(tag + "reading the text (first time takes ~20 s)…");
@@ -279,8 +284,8 @@ export function Scan({ loc, locs }) {
   const saveMeta = async () => { try { await api(`/documents/${meta.id}`, { method: "PUT", body: { doc_type: meta.doc_type, company: meta.company || null, reference: meta.reference || null, amount_cents: meta.amount ? cents(meta.amount) : null, doc_date: meta.doc_date || null, related_order_id: meta.related_order_id ? +meta.related_order_id : null, related_invoice_id: meta.related_invoice_id ? +meta.related_invoice_id : null, status: meta.status } }); setMeta(null); load(); } catch (x) { setE2(x.message); } };
   return <><h1>Documents</h1><Err e={err || e2} />
     {cam && <CameraCapture onShot={f => { setCam(false); handle([f]); }} onClose={() => setCam(false)} />}
-    <div className="row"><select value={dtype} onChange={e => setDtype(e.target.value)}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>{canCam ? <button className="p camera-btn" onClick={() => setCam(true)}>📷 Take photo (mobile / webcam)</button> : <label className="btn camera-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" hidden onChange={up} /></label>}<label className="btn">🖨 Add from scanner / computer<input type="file" multiple accept="image/*,application/pdf" hidden onChange={up} /></label>{busy && <span className="mute">{prog || "Working…"}</span>}</div>
-    <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files); }} className="card" style={{ marginBottom: 10, textAlign: "center", borderStyle: "dashed", borderColor: drag ? "var(--accent)" : undefined }}><b>Using a scanner?</b> Scan to a PDF or image on this computer (most scanners do “Scan to PC / folder”), then click <b>Add from scanner / computer</b> and select the files — or drag them here. You can add many at once. On a phone, use <b>Take photo</b>.</div>
+    <div className="row"><select value={dtype} onChange={e => setDtype(e.target.value)}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>{canCam ? <button className="p camera-btn" onClick={() => setCam(true)}>📷 Take photo (mobile / webcam)</button> : <label className="btn camera-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" hidden onChange={up} /></label>}<label className="btn">🖨 Add from scanner / computer<input type="file" multiple accept="image/*,.tif,.tiff,.bmp,application/pdf" hidden onChange={up} /></label>{busy && <span className="mute">{prog || "Working…"}</span>}</div>
+    <div onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files); }} className="card" style={{ marginBottom: 10, textAlign: "center", borderStyle: "dashed", borderColor: drag ? "var(--accent)" : undefined }}><b>Using a scanner?</b> Scan to a PDF or image on this computer (most scanners do “Scan to PC / folder”), then click <b>Add from scanner / computer</b> and select the files — or drag them here. You can add many at once. <span className="mute">Best scanner settings: A4, 200–300 dpi, grayscale or black &amp; white, save as PDF or JPEG (TIFF and BMP also work). Files up to 30 MB.</span> On a phone, use <b>Take photo</b>.</div>
     {sel && <Review doc={sel} sups={sups || []} onDone={() => { setSel(null); load(); }} />}
     {meta && <div className="card" style={{ marginBottom: 12 }}><b>Document details</b><div className="row" style={{ marginTop: 6 }}><select value={meta.doc_type} onChange={e => setMeta({ ...meta, doc_type: e.target.value })}>{DTYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
       <input placeholder="Company" value={meta.company || ""} onChange={e => setMeta({ ...meta, company: e.target.value })} /><input placeholder="Reference / number" value={meta.reference || ""} onChange={e => setMeta({ ...meta, reference: e.target.value })} /><input placeholder="Amount €" style={{ width: 90 }} value={meta.amount || ""} onChange={e => setMeta({ ...meta, amount: e.target.value })} />
@@ -339,28 +344,52 @@ export function DataPage() {
     <p className="mute" style={{ marginTop: 12 }}>Keep a copy somewhere else too (your computer or cloud drive) - download a backup regularly.</p></>;
 }
 
-/* ---------------- Two-factor sign-in ---------------- */
-export function MfaSetup({ forced, onDone }) {
-  const [s, setS] = useState(null), [code, setCode] = useState(""), [codes, setCodes] = useState(null), [err, setErr] = useState("");
-  const [qr, setQr] = useState("");
+/* ---------------- Two-step sign-in: the user CHOOSES: authenticator app or text-message code ---------------- */
+export function MfaSetup({ forced, onDone, user }) {
+  const [method, setMethod] = useState(null), [cfg] = useData("/config"), [err, setErr] = useState(""), [codes, setCodes] = useState(null);
+  if (codes) return <div className="login"><h1>Save your recovery codes</h1><div className="mute">Each works once if you lose your phone. They are shown only now. Write them on paper.</div><pre style={{ fontSize: 16 }}>{codes.join("\n")}</pre><button className="p" onClick={onDone}>I saved them</button></div>;
+  if (!method) return <div className="login"><h1>{forced ? "Two-step login is required" : "Turn on two-step login"}</h1>
+    <div className="mute">After your password you confirm with a code. Choose how you want to receive it:</div>
+    <button className="p" style={{ textAlign: "left", padding: 14 }} onClick={() => setMethod("app")}>🔐 <b>Authenticator app</b><br /><span style={{ fontSize: 12, opacity: .85 }}>Most secure. Free. Works without signal. Google or Microsoft Authenticator.</span></button>
+    <button className="s" style={{ textAlign: "left", padding: 14 }} disabled={!cfg?.sms_available} onClick={() => setMethod("sms")}>💬 <b>Text message (SMS)</b><br /><span className="mute" style={{ fontSize: 12 }}>{cfg?.sms_available ? "Easiest. We text a 6-digit code to your mobile each time you log in." : "Not set up on this server yet (the owner needs to connect an SMS service)."}</span></button>
+    {!forced && <button className="s" onClick={onDone}>Not now</button>}</div>;
+  return method === "app" ? <AppSetup forced={forced} err={err} setErr={setErr} setCodes={setCodes} back={() => setMethod(null)} /> : <SmsSetup user={user} setCodes={setCodes} back={() => setMethod(null)} />;
+}
+
+function AppSetup({ setCodes, back, err, setErr }) {
+  const [s, setS] = useState(null), [code, setCode] = useState(""), [qr, setQr] = useState("");
   useEffect(() => { api("/auth/mfa/setup", { method: "POST" }).then(setS).catch(x => setErr(x.message)); }, []);
   useEffect(() => { if (s) import("qrcode").then(m => (m.default || m).toDataURL(s.otpauth, { width: 180, margin: 1 })).then(setQr).catch(() => {}); }, [s]);
   async function enable() { try { setCodes((await api("/auth/mfa/enable", { method: "POST", body: { code } })).recovery_codes); } catch (x) { setErr(x.message); } }
-  if (codes) return <div className="login"><h1>Save your recovery codes</h1><div className="mute">Each works once if you lose your phone. They are shown only now.</div><pre style={{ fontSize: 16 }}>{codes.join("\n")}</pre><button className="p" onClick={onDone}>I saved them</button></div>;
-  return <div className="login"><h1>{forced ? "Two-factor login is required" : "Turn on two-factor login"}</h1><div className="mute">Scan with Google Authenticator / Microsoft Authenticator / Authy, or type the key in manually.</div><Err e={err} />
+  return <div className="login"><h1>Authenticator app</h1><div className="mute">Scan with Google Authenticator / Microsoft Authenticator / Authy, or type the key in manually.</div><Err e={err} />
     {s && <>{qr && <img alt="QR code" width={180} height={180} src={qr} style={{ alignSelf: "center", background: "#fff", padding: 6, borderRadius: 8 }} />}<div className="mute" style={{ fontSize: 12 }}>On the same phone? Skip the QR and copy this key into your authenticator app (“Enter a setup key”).</div><code style={{ wordBreak: "break-all" }}>{s.secret}</code>
-      <input placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" /><button className="p" disabled={code.length < 6} onClick={enable}>Confirm and turn on</button></>}</div>;
+      <input placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" /><button className="p" disabled={code.length < 6} onClick={enable}>Confirm and turn on</button></>}
+    <button className="s" onClick={back}>← Choose another way</button></div>;
+}
+
+function SmsSetup({ user, setCodes, back }) {
+  const [phone, setPhone] = useState(user?.phone || ""), [sent, setSent] = useState(""), [code, setCode] = useState(""), [err, setErr] = useState("");
+  async function send() { try { setErr(""); setSent((await api("/auth/mfa/sms/start", { method: "POST", body: { phone } })).sent_to); } catch (x) { setErr(x.message); } }
+  async function enable() { try { setCodes((await api("/auth/mfa/sms/enable", { method: "POST", body: { code } })).recovery_codes); } catch (x) { setErr(x.message); } }
+  return <div className="login"><h1>Text-message code</h1><div className="mute">Enter your mobile number. We send a code to check it is yours.</div><Err e={err} />
+    <input placeholder="+357 96 123456" value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" />
+    {!sent ? <button className="p" disabled={phone.length < 8} onClick={send}>Send me a code</button> : <>
+      <div className="mute">Code sent to {sent}. It is valid for 5 minutes.</div><input placeholder="6-digit code" value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" />
+      <button className="p" disabled={code.length < 6} onClick={enable}>Confirm and turn on</button><button className="s" onClick={send}>Send again</button></>}
+    <button className="s" onClick={back}>← Choose another way</button></div>;
 }
 
 export function Security({ user, reload }) {
-  const [e, setE] = useState(""), [msg, setMsg] = useState(""), [setup, setSetup] = useState(false);
-  if (setup) return <MfaSetup onDone={() => { setSetup(false); reload(); }} />;
-  async function off() { const pw = prompt("Your password"), code = pw && prompt("Current 6-digit code"); if (!code) return; try { await api("/auth/mfa/disable", { method: "POST", body: { password: pw, code } }); reload(); } catch (x) { setE(x.message); } }
+  const [e, setE] = useState(""), [setup, setSetup] = useState(false), [st, loadSt] = useData("/settings"), admin = ["owner", "admin"].includes(user.role);
+  if (setup) return <MfaSetup user={user} onDone={() => { setSetup(false); reload(); }} />;
+  async function off() { const pw = prompt("Your password"), code = pw && (user.mfa_method === "sms" ? "-" : prompt("Current 6-digit code")); if (!code) return; try { await api("/auth/mfa/disable", { method: "POST", body: { password: pw, code: code === "-" ? "" : code } }); reload(); } catch (x) { setE(x.message); } }
   async function out() { try { await api("/auth/logout-all", { method: "POST" }); localStorage.removeItem("token"); location.reload(); } catch (x) { setE(x.message); } }
+  async function policy(v) { try { await api("/settings", { method: "PUT", body: { mfa_policy: v } }); loadSt(); } catch (x) { setE(x.message); } }
   return <><h1 style={{ fontSize: 16, marginTop: 18 }}>My security</h1><Err e={e} />
-    <div className="row"><span>Two-factor login: <b className={user.totp_enabled ? "good" : "warn"}>{user.totp_enabled ? "ON" : "OFF"}</b></span>{user.totp_enabled ? <button className="s" onClick={off}>Turn off</button> : <button className="p" onClick={() => setSetup(true)}>Turn on</button>}<button className="s" onClick={out}>Log out everywhere</button><span className="mute">{msg}</span></div></>;
+    <div className="row"><span>Two-step login: <b className={user.totp_enabled ? "good" : "warn"}>{user.totp_enabled ? `ON (${user.mfa_method === "sms" ? "text message" : "authenticator app"})` : "OFF"}</b></span>{user.totp_enabled ? <button className="s" onClick={off}>Turn off</button> : <button className="p" onClick={() => setSetup(true)}>Turn on</button>}<button className="s" onClick={out}>Log out everywhere</button></div>
+    {admin && st && <div className="row"><span>Two-step login for owners and payment staff:</span><select value={st.mfa_policy} onChange={ev => policy(ev.target.value)}><option value="optional">Optional (each person chooses)</option><option value="required">Required (recommended when real money is approved)</option></select></div>}
+    {!user.totp_enabled && <div className="mute" style={{ fontSize: 12 }}>Two-step login protects your account even if someone learns your password. Recommended for anyone who approves payments.</div>}</>;
 }
-
 
 /* ---------------- Global search ---------------- */
 export function GlobalSearch({ go }) {

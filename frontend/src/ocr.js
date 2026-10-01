@@ -11,6 +11,19 @@ async function getWorker(onProgress, langs = ["eng", "ell"]) {
   return workerPromise;
 }
 
+// Scanners often save TIFF (browsers cannot show it) - convert to a normal JPEG before anything else.
+export const isTiff = f => /^image\/tiff?$/i.test(f.type) || /\.tiff?$/i.test(f.name);
+export async function tiffToJpeg(file, maxSide = 2400) {
+  const UTIF = (await import("utif")).default || (await import("utif"));
+  const buf = await file.arrayBuffer(), ifds = UTIF.decode(buf); if (!ifds.length) throw new Error("Empty TIFF");
+  UTIF.decodeImage(buf, ifds[0]); const rgba = UTIF.toRGBA8(ifds[0]), w = ifds[0].width, h = ifds[0].height;
+  const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
+  const k = Math.min(1, maxSide / Math.max(w, h)), o = document.createElement("canvas"); o.width = Math.round(w * k); o.height = Math.round(h * k);
+  const g = o.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, o.width, o.height); g.drawImage(c, 0, 0, o.width, o.height); c.width = c.height = 0;
+  const blob = await new Promise(r => o.toBlob(r, "image/jpeg", 0.88)); o.width = o.height = 0;
+  return new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
+}
+
 // Phone photos are 12+ megapixels: feeding them straight to the OCR engine runs the phone out of memory.
 // Shrink first (longest side <= maxSide), fix the orientation, and stretch the contrast a little.
 export async function prepareImage(file, { maxSide = 1700, quality = 0.88, enhance = true } = {}) {
@@ -32,11 +45,19 @@ export async function prepareImage(file, { maxSide = 1700, quality = 0.88, enhan
   return { canvas: c, blob };
 }
 
-async function pdfToImages(file, maxPages = 3, k = 1) {
-  const pdfjs = await import("pdfjs-dist/build/pdf.min.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = "/ocr/pdf.worker.min.mjs";
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise, out = [];
-  for (let i = 1; i <= Math.min(pdf.numPages, maxPages); i++) {
+// Digital PDFs (e-mailed invoices) already contain the text: read it directly - exact and instant. Scanned PDFs are images, so they get OCR.
+async function openPdf(file) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.min.mjs"); pdfjs.GlobalWorkerOptions.workerSrc = "/ocr/pdf.worker.min.mjs";
+  return pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+}
+const pagesToRead = n => n <= 3 ? [...Array(n)].map((_, i) => i + 1) : [1, 2, n];   // totals are usually on the last page
+async function pdfText(pdf) {
+  let t = ""; for (const i of pagesToRead(pdf.numPages)) { const tc = await (await pdf.getPage(i)).getTextContent(); t += tc.items.map(x => x.str + (x.hasEOL ? "\n" : " ")).join("") + "\n"; }
+  return t;
+}
+async function pdfToImages(pdf, k = 1) {
+  const out = [];
+  for (const i of pagesToRead(pdf.numPages)) {
     const page = await pdf.getPage(i), vp = page.getViewport({ scale: 1.6 * k }), c = document.createElement("canvas");
     c.width = vp.width; c.height = vp.height; await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise; out.push(c);
   }
@@ -45,16 +66,26 @@ async function pdfToImages(file, maxPages = 3, k = 1) {
 
 // Tries the full reader first; if the phone runs out of memory it retries with a lighter one (English only, smaller picture).
 const ATTEMPTS = [{ langs: ["eng", "ell"], side: 1700 }, { langs: ["eng", "ell"], side: 1200 }, { langs: ["eng"], side: 1000 }];
+const rotated = (c, deg) => { const r = document.createElement("canvas"), q = deg % 180 !== 0; r.width = q ? c.height : c.width; r.height = q ? c.width : c.height; const g = r.getContext("2d"); g.translate(r.width / 2, r.height / 2); g.rotate(deg * Math.PI / 180); g.drawImage(c, -c.width / 2, -c.height / 2); return r; };
+export const resetOcr = resetWorker;
 export async function ocrFile(file, onProgress) {
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  let pdf = null;
+  if (isPdf) { pdf = await openPdf(file); const t = await pdfText(pdf); if (t.replace(/\s/g, "").length > 60) return { text: t, confidence: 100, light: false, source: "pdf-text" }; }
   let lastErr;
   for (let i = 0; i < ATTEMPTS.length; i++) {
     const { langs, side } = ATTEMPTS[i];
     try {
       const w = await getWorker(onProgress, langs);
-      const inputs = isPdf ? await pdfToImages(file, 3, side / 1700) : [(await prepareImage(file, { maxSide: side })).canvas];
+      const inputs = isPdf ? await pdfToImages(pdf, side / 1700) : [(await prepareImage(file, { maxSide: side })).canvas];
       let text = "", conf = 0;
-      for (const inp of inputs) { const { data } = await w.recognize(inp); text += data.text + "\n"; conf += data.confidence; inp.width = inp.height = 0; }
+      for (let inp of inputs) {
+        let { data } = await w.recognize(inp);
+        if (!isPdf && data.confidence < 55) {   // scanners often feed pages sideways / upside down: try the other orientations, keep the best
+          for (const deg of [90, 270, 180]) { const r = rotated(inp, deg), { data: d2 } = await w.recognize(r); if (d2.confidence > data.confidence + 12) { data = d2; } r.width = r.height = 0; }
+        }
+        text += data.text + "\n"; conf += data.confidence; inp.width = inp.height = 0;
+      }
       return { text, confidence: Math.round(conf / inputs.length), light: i > 0 };
     } catch (e) { lastErr = e; await resetWorker(); if (onProgress) onProgress(0, "retrying with a lighter reader…"); }
   }

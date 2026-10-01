@@ -35,6 +35,11 @@ class User(Base):
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     recovery_codes: Mapped[str | None] = mapped_column(Text, nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    mfa_method: Mapped[str | None] = mapped_column(String(10), nullable=True)      # app | sms (when totp_enabled is true)
+    sms_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)        # hash of the pending text-message code
+    sms_expires: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sms_tries: Mapped[int] = mapped_column(Integer, default=0)
+    sms_pending_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)   # number being verified during setup
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -130,6 +135,7 @@ class Document(Base):
     related_invoice_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     related_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source: Mapped[str | None] = mapped_column(String(30), nullable=True)  # upload | scan | email
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)  # sha256 of the original file (duplicate warning)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 class Invoice(Base):

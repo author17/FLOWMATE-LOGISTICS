@@ -45,7 +45,7 @@ export function CashUp({ loc, locs }) {
 
 export function Audit() {
   const [rows, , err] = useData("/audit");
-  return <><h1>Audit history</h1><Err e={err} />{rows && <Table cols={[["When", r => r.at.slice(0, 19).replace("T", " ")], ["User", r => r.user_name], ["Action", r => r.action], ["Object", r => `${r.object_type} ${r.object_id}`], ["Change", r => <code style={{ fontSize: 11 }}>{JSON.stringify(r.new_value)}</code>]]} rows={rows} />}</>;
+  return <><h1>Audit history</h1><Err e={err} />{rows && <Table cols={[["When", r => r.at.slice(0, 19).replace("T", " ")], ["User", r => r.user_name], ["Action", r => r.action], ["Object", r => `${r.object_type} ${r.object_id}`], ["Change / device", r => r.new_value?.device ? <span>{r.new_value.device}{r.new_value.email ? ` · tried: ${r.new_value.email}` : ""}<div className="mute" style={{ fontSize: 11 }}>IP {r.new_value.ip}</div></span> : <code style={{ fontSize: 11 }}>{JSON.stringify(r.new_value)}</code>]]} rows={rows} />}</>;
 }
 
 export function Delivery({ user }) {

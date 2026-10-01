@@ -64,7 +64,7 @@ def test_duplicate_invoice_blocked_and_low_stock_po():
     assert any(i["quantity"] > 0 for p in po for i in p["items"])  # milk is below min after stock drops? at least endpoint works
 
 def test_scan_and_export_and_dashboard():
-    r = c.post("/api/documents/scan", headers=owner, files={"file": ("r.jpg", b"fakejpg")}, data={"doc_type": "receipt"})
+    r = c.post("/api/documents/scan", headers=owner, files={"file": ("r.jpg", b"\xff\xd8\xff fakejpg")}, data={"doc_type": "receipt"})
     assert r.status_code == 201 and r.json()["status"] == "NEEDS_REVIEW"
     assert c.post("/api/documents/scan", headers=owner, files={"file": ("r.exe", b"x")}).status_code == 415
     assert c.get("/api/export/invoices.csv", headers=owner).text.startswith("id,")
