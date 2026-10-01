@@ -15,6 +15,7 @@ const TABS = [["Dashboard", Dashboard, "reports", "Dashboard", ""],
 const can = (user, area) => user.perms.includes("*") || user.perms.includes(area) || (area === "assistant_any" && (user.perms.includes("assistant") || user.perms.includes("assistant_basic")));
 
 export default function App() {
+  const [menu, setMenu] = useState(false);
   const [demo, setDemo] = useState(false), [user, setUser] = useState(null), [ready, setReady] = useState(false), [tab, setTab] = useState(null), [locs, setLocs] = useState([]), [loc, setLoc] = useState("");
   useEffect(() => { api("/config").then(c => setDemo(c.demo)).catch(() => {}); api("/auth/me").then(setUser).catch(() => {}).finally(() => setReady(true)); }, []);
   useEffect(() => { if (user && !user.must_change_password) api("/locations").then(setLocs).catch(() => setLocs([])); }, [user]);
@@ -24,14 +25,31 @@ export default function App() {
   if (user.must_change_password) return <><DemoBar demo={demo} /><ChangePassword onDone={() => setUser({ ...user, must_change_password: false })} /></>;
   const visible = TABS.filter(t => can(user, t[2])), cur = visible.find(t => t[0] === tab) || visible[0];
   if (!cur) return <p style={{ padding: 20 }}>Your role has no screens yet. Ask the owner.</p>;
-  const Screen = cur[1];
+  const Screen = cur[1], goTab = n => { setTab(n); setMenu(false); window.scrollTo(0, 0); };
+  const quick = ["Dashboard", "Orders", "Scan", "Delivery", "Stock"].map(n => visible.find(t => t[0] === n)).filter(Boolean).slice(0, 4);
   return <><DemoBar demo={demo} /><div className="app">
-    <nav className="side"><h2>FLOWMATE</h2><div className="mute logo2">LOGISTICS<br />Your business's digital assistant</div>
-      <div className="tabs">{visible.map(([n, , , label, grp], i) => <React.Fragment key={n}>{grp && grp !== visible[i - 1]?.[4] && <div className="mute grp">{grp}</div>}<button className={n === cur[0] ? "on" : ""} onClick={() => setTab(n)}>{label}</button></React.Fragment>)}</div>
+    <nav className={"side" + (menu ? " open" : "")}><div className="row mclose" style={{ justifyContent: "space-between" }}><b>Menu</b><button className="s" onClick={() => setMenu(false)}>Close ✕</button></div><h2>FLOWMATE</h2><div className="mute logo2">LOGISTICS<br />Your business's digital assistant</div>
+      <div className="tabs">{visible.map(([n, , , label, grp], i) => <React.Fragment key={n}>{grp && grp !== visible[i - 1]?.[4] && <div className="mute grp">{grp}</div>}<button className={n === cur[0] ? "on" : ""} onClick={() => goTab(n)}>{label}</button></React.Fragment>)}</div>
+      <InstallHint />
       <div className="mute who">{user.name} · {user.role}</div><button onClick={() => { setToken(null); location.reload(); }}>Log out</button></nav>
     <main className="main">
-      <div className="row" style={{ justifyContent: "space-between" }}><div className="row" style={{ margin: 0 }}><select value={loc} onChange={e => setLoc(e.target.value)}><option value="">All locations</option>{locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select><GlobalSearch go={setTab} /></div>{can(user, "reports") && <Bell />}</div>
-      <Screen key={cur[0] + loc} loc={loc ? +loc : null} locs={locs} user={user} reload={() => api("/auth/me").then(setUser)} go={setTab} /></main></div></>;
+      <div className="row" style={{ justifyContent: "space-between" }}><div className="row" style={{ margin: 0 }}><select value={loc} onChange={e => setLoc(e.target.value)}><option value="">All locations</option>{locs.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select><GlobalSearch go={goTab} /></div>{can(user, "reports") && <Bell />}</div>
+      <Screen key={cur[0] + loc} loc={loc ? +loc : null} locs={locs} user={user} reload={() => api("/auth/me").then(setUser)} go={goTab} /></main>
+    <div className="bnav">{quick.map(([n, , , label]) => <button key={n} className={n === cur[0] ? "on" : ""} onClick={() => goTab(n)}>{ICON[n]}<span>{label}</span></button>)}<button onClick={() => setMenu(true)}>☰<span>Menu</span></button></div></div></>;
+}
+
+const ICON = { Dashboard: "🏠", Orders: "🧾", Scan: "📷", Delivery: "🚚", Stock: "📦" };
+
+// "Install the app" helper: Android/Chrome shows a real install button, iPhone shows the manual steps.
+function InstallHint() {
+  const [ev, setEv] = useState(null), [done, setDone] = useState(false);
+  useEffect(() => { const h = e => { e.preventDefault(); setEv(e); }; window.addEventListener("beforeinstallprompt", h); window.addEventListener("appinstalled", () => setDone(true)); return () => window.removeEventListener("beforeinstallprompt", h); }, []);
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  if (standalone || done) return null;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (ev) return <div className="card" style={{ margin: "10px 4px" }}><b>Install the app</b><div className="mute" style={{ margin: "4px 0 8px" }}>Opens full-screen from your home screen.</div><button className="p" onClick={async () => { ev.prompt(); await ev.userChoice; setEv(null); }}>Install FLOWMATE</button></div>;
+  if (ios) return <div className="card mute" style={{ margin: "10px 4px", fontSize: 12 }}><b>Install on iPhone</b><br />Open this page in Safari, tap the Share button, then “Add to Home Screen”.</div>;
+  return null;
 }
 
 function Bell() {
@@ -54,7 +72,7 @@ function Login({ onDone }) {
 
 function ChangePassword({ onDone }) {
   const [o, setO] = useState(""), [n, setN] = useState(""), [err, setErr] = useState("");
-  async function go(e) { e.preventDefault(); try { await api("/auth/change-password", { method: "POST", body: { old_password: o, new_password: n } }); onDone(); } catch (x) { setErr(x.message); } }
+  async function go(e) { e.preventDefault(); try { const r = await api("/auth/change-password", { method: "POST", body: { old_password: o, new_password: n } }); if (r.access_token) setToken(r.access_token); onDone(); } catch (x) { setErr(x.message); } }
   return <form className="login" onSubmit={go}><h1>Choose a new password</h1><div className="mute">Replace the temporary password (at least 10 characters).</div>{err && <div className="err">{err}</div>}
     <input type="password" placeholder="Temporary password" value={o} onChange={e => setO(e.target.value)} /><input type="password" placeholder="New password" value={n} onChange={e => setN(e.target.value)} /><button className="p">Save and continue</button></form>;
 }

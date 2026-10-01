@@ -13,6 +13,7 @@
   "@tesseract.js-data/ell": "^1.0.0",
   "@tesseract.js-data/eng": "^1.0.0",
   "pdfjs-dist": "^6.3.289",
+  "qrcode": "^1.5.4",
   "react": "^18.3.1",
   "react-dom": "^18.3.1",
   "tesseract.js": "^7.0.0"

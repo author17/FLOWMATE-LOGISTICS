@@ -47,7 +47,7 @@ def change_pw(d: PwChange, u=Depends(current_user), db: Session = Depends(get_db
     if len(d.new_password) < 10: raise HTTPException(422, "New password must be at least 10 characters")
     if d.new_password == d.old_password: raise HTTPException(422, "Choose a different password")
     u.password_hash = hash_password(d.new_password); u.must_change_password = False; u.token_version = (u.token_version or 0) + 1
-    audit.log(db, u, "change_password", "user", u.id); db.commit(); return {"ok": True}
+    audit.log(db, u, "change_password", "user", u.id); db.commit(); return {"ok": True, "access_token": make_token(u)}
 
 class NewUser(BaseModel):
     name: str; email: str; password: str; role: str = "employee"; location_id: int | None = None; phone: str | None = None
