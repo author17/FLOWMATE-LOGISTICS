@@ -9,12 +9,33 @@ async function getWorker(onProgress) {
   return workerPromise;
 }
 
+// Phone photos are 12+ megapixels: feeding them straight to the OCR engine runs the phone out of memory.
+// Shrink first (longest side <= maxSide), fix the orientation, and stretch the contrast a little.
+export async function prepareImage(file, { maxSide = 1700, quality = 0.88, enhance = true } = {}) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: "from-image" }); }
+  catch { bmp = await new Promise((ok, no) => { const im = new Image(), u = URL.createObjectURL(file); im.onload = () => { URL.revokeObjectURL(u); ok(im); }; im.onerror = no; im.src = u; }); }
+  const w0 = bmp.width || bmp.naturalWidth, h0 = bmp.height || bmp.naturalHeight, k = Math.min(1, maxSide / Math.max(w0, h0));
+  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w0 * k)); c.height = Math.max(1, Math.round(h0 * k));
+  const g = c.getContext("2d", { willReadFrequently: true }); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
+  if (bmp.close) bmp.close();
+  if (enhance) {   // grayscale + simple auto-contrast (2%..98%)
+    const img = g.getImageData(0, 0, c.width, c.height), d = img.data, hist = new Uint32Array(256);
+    for (let i = 0; i < d.length; i += 4) { const y = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0; d[i] = d[i + 1] = d[i + 2] = y; hist[y]++; }
+    const n = d.length / 4; let lo = 0, hi = 255, a = 0; for (; lo < 255 && a + hist[lo] < n * .02; lo++) a += hist[lo]; a = 0; for (; hi > 0 && a + hist[hi] < n * .02; hi--) a += hist[hi];
+    if (hi - lo > 40) { const f = 255 / (hi - lo); for (let i = 0; i < d.length; i += 4) { const v = Math.max(0, Math.min(255, (d[i] - lo) * f)); d[i] = d[i + 1] = d[i + 2] = v; } }
+    g.putImageData(img, 0, 0);
+  }
+  const blob = await new Promise(r => c.toBlob(r, "image/jpeg", quality));
+  return { canvas: c, blob };
+}
+
 async function pdfToImages(file, maxPages = 3) {
   const pdfjs = await import("pdfjs-dist/build/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "/ocr/pdf.worker.min.mjs";
   const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise, out = [];
   for (let i = 1; i <= Math.min(pdf.numPages, maxPages); i++) {
-    const page = await pdf.getPage(i), vp = page.getViewport({ scale: 2.2 }), c = document.createElement("canvas");
+    const page = await pdf.getPage(i), vp = page.getViewport({ scale: 1.6 }), c = document.createElement("canvas");
     c.width = vp.width; c.height = vp.height; await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise; out.push(c);
   }
   return out;
@@ -22,9 +43,11 @@ async function pdfToImages(file, maxPages = 3) {
 
 export async function ocrFile(file, onProgress) {
   const w = await getWorker(onProgress);
-  const inputs = file.type === "application/pdf" || /\.pdf$/i.test(file.name) ? await pdfToImages(file) : [file];
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  const inputs = isPdf ? await pdfToImages(file) : [(await prepareImage(file)).canvas];
   let text = "", conf = 0;
-  for (const inp of inputs) { const { data } = await w.recognize(inp); text += data.text + "\n"; conf += data.confidence; }
+  try { for (const inp of inputs) { const { data } = await w.recognize(inp); text += data.text + "\n"; conf += data.confidence; inp.width = inp.height = 0; } }
+  catch (e) { workerPromise = null; try { await w.terminate(); } catch { } throw e; }   // start from a clean engine next time
   return { text, confidence: Math.round(conf / inputs.length) };
 }
 

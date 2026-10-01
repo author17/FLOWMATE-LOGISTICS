@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, eur, cents, download } from "./api.js";
 import { useData, Err, Tag, Table, Card } from "./ui.jsx";
 import { BankToast } from "./bank.jsx";
-import { ocrFile, parseText } from "./ocr.js";
+import { ocrFile, parseText, prepareImage } from "./ocr.js";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const useRun = (load) => { const [e, setE] = useState(""); return [e, (fn) => async (...a) => { try { await fn(...a); setE(""); load && load(); } catch (x) { setE(x.message); } }]; };
@@ -228,12 +228,16 @@ export function Scan({ loc, locs }) {
       const file = files[i], tag = files.length > 1 ? `File ${i + 1}/${files.length}: ` : "";
       try {
         setProg(tag + "uploading…");
-        const fd = new FormData(); fd.append("file", file); fd.append("doc_type", dtype); if (loc) fd.append("location_id", loc);
+        let up = file;   // shrink big phone photos before uploading (faster, less memory, less storage)
+        if (/^image\//.test(file.type) && file.size > 1.5e6) { try { const { blob } = await prepareImage(file, { maxSide: 2400, quality: 0.85, enhance: false }); if (blob && blob.size < file.size) up = new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }); } catch { } }
+        const fd = new FormData(); fd.append("file", up); fd.append("doc_type", dtype); if (loc) fd.append("location_id", loc);
         let d = await api("/documents/scan", { method: "POST", body: fd });
         const ex = d.extracted || {};
         if (["receipt", "invoice", "delivery_note", "purchase_order", "tax_document"].includes(dtype) && !ex.total && !ex.supplier) {   // server has no reader: read it here, free, in the browser
           setProg(tag + "reading the text (first time takes ~20 s)…");
-          const { text, confidence } = await ocrFile(file, p => setProg(tag + `reading… ${p}%`));
+          let text = "", confidence = 0;
+          try { ({ text, confidence } = await ocrFile(up, p => setProg(tag + `reading… ${p}%`))); }
+          catch (x) { setE2(`${file.name}: saved, but the phone could not read it automatically (${x.message || "low memory"}). Open Details and type the fields, or try again with better light / closer photo.`); last = d; continue; }
           const r = parseText(text, sups || []);
           const extracted = { ...r, confidence, raw_text: text.slice(0, 4000) };
           const sup = (sups || []).find(s => s.name === r.supplier);
