@@ -1,0 +1,11 @@
+**/node_modules
+**/__pycache__
+*.db
+.git
+storage/*
+.env
+frontend/dist
+frontend/public/ocr
+
+mobile
+frontend/dist-mobile

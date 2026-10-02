@@ -1,0 +1,3 @@
+{ "appId": "com.flowmate.logistics", "appName": "FLOWMATE", "webDir": "../frontend/dist-mobile",
+  "android": { "allowMixedContent": false }, "ios": { "contentInset": "always" },
+  "plugins": { "SplashScreen": { "launchShowDuration": 800, "backgroundColor": "#0f1216" } } }

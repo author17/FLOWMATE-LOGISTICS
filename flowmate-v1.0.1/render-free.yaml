@@ -1,0 +1,14 @@
+# FREE practice copy on Render: one free web service, fake data only, NO database and NO disk.
+# Limits (Render free plan): sleeps after 15 min idle (about 1 min to wake), and everything entered is wiped on each restart/redeploy.
+# Use ONLY for learning. Never put real data here.
+services:
+  - type: web
+    name: flowmate-practice
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - { key: ENV, value: production }
+      - { key: DEMO_MODE, value: "1" }
+      - { key: AUTO_SEED, value: "1" }
+      - { key: SECRET_KEY, generateValue: true }
