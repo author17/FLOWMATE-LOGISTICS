@@ -1,0 +1,23 @@
+# Status vs blueprint (v0.4)
+Built with screens: dashboard, orders (multi-item, customer, payment method), customers, suppliers, products, stock + purchase orders, invoices, expenses, receipts/documents + OCR (needs API key),
+banking (CSV import, matching, reconciliation), payments (sandbox bank), documents, reports (12, PDF/Excel/CSV), notifications, users & permissions, settings, audit, exports, delivery, gym memberships, Stripe card links, assistant, PWA.
+
+Still open (honest list):
+1. Live bank connection (Eurobank): needs an Open Banking provider account + a sample statement; importer adapts to the real CSV format first.
+2. Two-factor login, password-reset email.
+3. Till/POS daily sales import (need the tills' export format).
+4. Stripe refunds, receipts by email, recurring membership billing (direct debit / card on file).
+5. Object storage (S3) for documents; automated backups; invoice line items editing in UI; stock transfer between locations.
+6. Accountant review: VAT rates per product, cash-register rules, Cyprus e-invoicing requirements.
+7. Native Android/iOS apps (the installable web app works on phones now).
+
+
+## v0.5 (done)
+Bank connection portal, payment approval flow, MFA, location scoping, document library, stock transfer/movements, purchase orders (PDF/e-mail), till CSV import, public order page, inbound e-mail, nightly backups/exports, due-date reminders + e-mail alerts, dashboard graph.
+
+## Not built yet
+Multi-tenant SaaS (one deployment per customer today), push notifications, native till integration, payment initiation (needs licence).
+
+
+## v1.0
+Multi-business isolation, sign-up, business types, account deletion, privacy/terms, Capacitor Android/iOS (see STORES.md). Not yet: e-mail verification, billing, push notifications, biometric unlock.

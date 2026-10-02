@@ -1,0 +1,17 @@
+node_modules/
+__pycache__/
+*.pyc
+*.db
+.env
+storage/*
+!storage/.gitkeep
+.pytest_cache/
+frontend/public/ocr/
+
+frontend/dist-mobile/
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/App/Pods/
+*.keystore
+*.jks
