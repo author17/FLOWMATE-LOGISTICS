@@ -1,0 +1,4 @@
+date,amount,reference,counterparty
+30/09/2026,85.00,ORDER-1,Maria Georgiou
+30/09/2026,-450.00,INV-5521 ABC Foods,ABC FOODS LTD
+29/09/2026,-63.20,Electricity bill,EAC

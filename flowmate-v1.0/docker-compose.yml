@@ -1,0 +1,20 @@
+# Local production-like run:  docker compose up --build
+# Real system:  ENV=production, create the owner once with create_owner.py (see docs/DEPLOY.md)
+services:
+  db:
+    image: postgres:16
+    environment: { POSTGRES_USER: flowmate, POSTGRES_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD}", POSTGRES_DB: flowmate }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    restart: unless-stopped
+  app:
+    build: .
+    depends_on: [db]
+    ports: ["8000:8000"]
+    environment:
+      ENV: production
+      SECRET_KEY: "${SECRET_KEY:?set SECRET_KEY (32+ random chars)}"
+      DATABASE_URL: "postgresql+psycopg://flowmate:${DB_PASSWORD}@db:5432/flowmate"
+      CORS_ORIGINS: "${CORS_ORIGINS:-}"
+    volumes: [files:/data/files]
+    restart: unless-stopped
+volumes: { pgdata: {}, files: {} }
