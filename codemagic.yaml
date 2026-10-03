@@ -7,7 +7,7 @@ workflows:
       app_store_connect: FLOWMATE_ASC
     environment:
       groups:
-        - flowmate_ios
+        - flowmate_b64
       vars:
         VITE_API_BASE: "https://flowmate-logistics-production.up.railway.app"
         APP_STORE_APPLE_ID: "6818750307"
@@ -22,8 +22,9 @@ workflows:
         script: keychain initialize
       - name: Fetch signing files
         script: |
-          echo "key length: ${#CERTIFICATE_PRIVATE_KEY}"
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          echo "key length: ${#CERTIFICATE_KEY_B64}"
+          echo "$CERTIFICATE_KEY_B64" | base64 --decode > /tmp/cert_key
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create --certificate-key @file:/tmp/cert_key
           keychain add-certificates
       - name: Apply profiles
         script: xcode-project use-profiles --project mobile/ios/App/App.xcodeproj
@@ -39,5 +40,3 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
-
-
