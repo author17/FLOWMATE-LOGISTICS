@@ -1,25 +1,40 @@
-# iPhone build in the cloud (you have no Mac). Connect this GitHub repo in Codemagic (codemagic.io), add your App Store Connect API key
-# under Teams > Integrations, and Codemagic signs + uploads to TestFlight. Replace the bundle id if you changed appId.
 workflows:
   ios-release:
     name: FLOWMATE iOS
     max_build_duration: 45
     instance_type: mac_mini_m2
-    integrations: { app_store_connect: FLOWMATE_ASC }
+    integrations:
+      app_store_connect: FLOWMATE_ASC
     environment:
-      ios_signing: { distribution_type: app_store, bundle_identifier: com.flowmate.logistics }
-      vars: { VITE_API_BASE: "https://flowmate-logistics-production.up.railway.app", APP_STORE_APPLE_ID: "6818750307" }
+      groups:
+        - flowmate_signing
+      vars:
+        VITE_API_BASE: "https://flowmate-logistics-production.up.railway.app"
+        APP_STORE_APPLE_ID: "6818750307"
+        BUNDLE_ID: "com.flowmate.logistics"
       node: 22
     scripts:
       - name: Build web app
         script: cd frontend && npm ci && npm run build:mobile
       - name: Sync Capacitor
         script: cd mobile && npm ci && npx cap sync ios
-      - name: Signing
+      - name: Set up keychain
+        script: keychain initialize
+      - name: Fetch signing files
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+      - name: Apply profiles
         script: xcode-project use-profiles --project mobile/ios/App/App.xcodeproj
       - name: Build number
-        script: cd mobile/ios/App && agvtool new-version -all $(($(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID") + 1))
+        script: |
+          LATEST=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          cd mobile/ios/App && agvtool new-version -all $((LATEST + 1))
       - name: Build ipa
         script: xcode-project build-ipa --project mobile/ios/App/App.xcodeproj --scheme App
-    artifacts: [build/ios/ipa/*.ipa]
-    publishing: { app_store_connect: { auth: integration, submit_to_testflight: true } }
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
