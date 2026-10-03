@@ -7,7 +7,7 @@ workflows:
       app_store_connect: FLOWMATE_ASC
     environment:
       groups:
-        - flowmate_signing
+        - flowmate_ios
       vars:
         VITE_API_BASE: "https://flowmate-logistics-production.up.railway.app"
         APP_STORE_APPLE_ID: "6818750307"
@@ -39,4 +39,5 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
 
