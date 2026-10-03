@@ -30,8 +30,7 @@ workflows:
         script: xcode-project use-profiles --project mobile/ios/App/App.xcodeproj
       - name: Build number
         script: |
-          LATEST=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" || echo 0)
-          cd mobile/ios/App && agvtool new-version -all $((LATEST + 1))
+          cd mobile/ios/App && agvtool new-version -all $BUILD_NUMBER
       - name: Build ipa
         script: xcode-project build-ipa --project mobile/ios/App/App.xcodeproj --scheme App
     artifacts:
