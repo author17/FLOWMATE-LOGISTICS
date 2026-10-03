@@ -22,8 +22,8 @@ workflows:
         script: keychain initialize
       - name: Fetch signing files
         script: |
-          echo "key length: ${#SIGNING_KEY_B64}"
-          echo "$SIGNING_KEY_B64" | base64 --decode > /tmp/cert_key
+          echo "key length: ${#CERTIFICATE_KEY_B64}"
+          echo "$CERTIFICATE_KEY_B64" | base64 --decode > /tmp/cert_key
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create --certificate-key @file:/tmp/cert_key
           keychain add-certificates
       - name: Apply profiles
@@ -40,5 +40,6 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
 
 
